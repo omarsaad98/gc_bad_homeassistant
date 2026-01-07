@@ -43,15 +43,19 @@ This integration may be available through HACS in the future.
 
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for "GoCardless Bank Account Data"
-3. Enter your GoCardless API Secret Key
-4. Click Submit
+3. Enter your **Secret ID**
+4. Enter your **Secret Key**
+5. Click Submit
 
-### Getting Your API Secret
+### Getting Your API Credentials
 
 1. Sign up for a GoCardless account at [https://gocardless.com](https://gocardless.com)
-2. Navigate to the Bank Account Data section
-3. Generate an API secret key
-4. Copy the secret key for use in Home Assistant
+2. Navigate to the **Developers** → **API Keys** section
+3. Click **Create New Secret**
+4. You'll receive:
+   - **Secret ID** (your application identifier)
+   - **Secret Key** (your application password)
+5. **Save both immediately** - the Secret Key is only shown once!
 
 ## Adding Bank Connections
 
@@ -116,13 +120,14 @@ custom_components/gc_bad/
 
 - Python 3.12+
 - Home Assistant 2024.12+
-- GoCardless API Secret
+- GoCardless API Credentials (Secret ID + Secret Key)
 
 ### Dependencies
 
 - `homeassistant` - Home Assistant core
 - `aiohttp` - Async HTTP client
 - `pycountry` - Country codes and names
+- `python-dotenv` - Environment variable management (for testing)
 
 ## Troubleshooting
 

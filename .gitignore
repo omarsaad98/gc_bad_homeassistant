@@ -52,9 +52,21 @@ htmlcov/
 .uv/
 uv.lock
 
-# Secrets
+# Secrets and credentials
 secrets.yaml
 *.secret
 .env
 .env.*
+!.env.example
 
+# Test data
+tests/test_data/
+tests/test_data/tokens.json
+tests/test_data/api_responses/
+*.log
+test_logs/
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/

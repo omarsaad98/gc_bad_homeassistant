@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
 from .api_client import GoCardlessAPIClient
-from .const import CONF_API_SECRET, DOMAIN
+from .const import CONF_SECRET_ID, CONF_SECRET_KEY, DOMAIN
 from .coordinator import GoCardlessDataUpdateCoordinator
 from .views import GoCardlessAuthCallbackView
 
@@ -28,11 +28,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up GoCardless Bank Account Data from a config entry."""
-    # Get API secret from config entry
-    api_secret = entry.data[CONF_API_SECRET]
+    # Get credentials from config entry
+    secret_id = entry.data[CONF_SECRET_ID]
+    secret_key = entry.data[CONF_SECRET_KEY]
     
     # Create API client
-    api_client = GoCardlessAPIClient(hass, api_secret)
+    api_client = GoCardlessAPIClient(hass, secret_id, secret_key)
     
     # Create data update coordinator
     coordinator = GoCardlessDataUpdateCoordinator(hass, api_client)

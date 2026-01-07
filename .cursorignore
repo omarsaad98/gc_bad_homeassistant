@@ -1,0 +1,21 @@
+# Test data and secrets
+tests/test_data/
+tests/test_data/tokens.json
+tests/test_data/api_responses/
+
+# Coverage reports
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.env.example

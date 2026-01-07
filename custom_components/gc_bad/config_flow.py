@@ -11,7 +11,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .api_client import GoCardlessAPIClient
-from .const import CONF_API_SECRET, DOMAIN
+from .const import CONF_SECRET_ID, CONF_SECRET_KEY, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,20 +39,24 @@ class GoCardlessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            api_secret = user_input[CONF_API_SECRET]
+            secret_id = user_input[CONF_SECRET_ID]
+            secret_key = user_input[CONF_SECRET_KEY]
             
-            # Validate the API key
-            api_client = GoCardlessAPIClient(self.hass, api_secret)
+            # Validate the credentials
+            api_client = GoCardlessAPIClient(self.hass, secret_id, secret_key)
             
             try:
                 if await api_client.validate_api_key():
                     # Check if already configured
-                    await self.async_set_unique_id(api_secret[:16])
+                    await self.async_set_unique_id(secret_id)
                     self._abort_if_unique_id_configured()
                     
                     return self.async_create_entry(
                         title="GoCardless Bank Account Data",
-                        data={CONF_API_SECRET: api_secret},
+                        data={
+                            CONF_SECRET_ID: secret_id,
+                            CONF_SECRET_KEY: secret_key,
+                        },
                     )
                 else:
                     errors["base"] = "invalid_auth"
@@ -64,7 +68,8 @@ class GoCardlessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_API_SECRET): str,
+                    vol.Required(CONF_SECRET_ID): str,
+                    vol.Required(CONF_SECRET_KEY): str,
                 }
             ),
             errors=errors,
@@ -118,8 +123,9 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
             self._country = user_input["country"]
             
             # Get API client
-            api_secret = self.config_entry.data[CONF_API_SECRET]
-            self._api_client = GoCardlessAPIClient(self.hass, api_secret)
+            secret_id = self.config_entry.data[CONF_SECRET_ID]
+            secret_key = self.config_entry.data[CONF_SECRET_KEY]
+            self._api_client = GoCardlessAPIClient(self.hass, secret_id, secret_key)
             
             # Fetch institutions for selected country
             try:

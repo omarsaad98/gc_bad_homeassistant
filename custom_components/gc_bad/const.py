@@ -2,7 +2,8 @@
 from datetime import timedelta
 
 DOMAIN = "gc_bad"
-CONF_API_SECRET = "api_secret"
+CONF_SECRET_ID = "secret_id"
+CONF_SECRET_KEY = "secret_key"
 
 # API endpoints
 API_BASE_URL = "https://bankaccountdata.gocardless.com"

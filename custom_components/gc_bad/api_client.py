@@ -18,21 +18,53 @@ _LOGGER = logging.getLogger(__name__)
 class GoCardlessAPIClient:
     """GoCardless API client with rate limit management."""
 
-    def __init__(self, hass: HomeAssistant, api_secret: str) -> None:
+    def __init__(self, hass: HomeAssistant, secret_id: str, secret_key: str) -> None:
         """Initialize the API client."""
         self.hass = hass
-        self._api_secret = api_secret
+        self._secret_id = secret_id
+        self._secret_key = secret_key
         self._session = async_get_clientsession(hass)
         self._base_url = API_BASE_URL
+        self._access_token: str | None = None
+        self._token_expires: datetime | None = None
         
         # Rate limit tracking per endpoint
         self._rate_limits: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
+    async def _ensure_token(self) -> None:
+        """Ensure we have a valid access token."""
+        if self._access_token and self._token_expires:
+            if datetime.now() < self._token_expires:
+                return  # Token still valid
+        
+        # Get new token
+        await self._refresh_token()
+
+    async def _refresh_token(self) -> None:
+        """Get a new access token using secret ID and key."""
+        url = f"{self._base_url}/api/v2/token/new/"
+        
+        async with self._session.post(
+            url,
+            json={
+                "secret_id": self._secret_id,
+                "secret_key": self._secret_key,
+            },
+        ) as response:
+            response.raise_for_status()
+            data = await response.json()
+            
+            self._access_token = data["access"]
+            # Token typically expires in 24 hours, refresh before that
+            self._token_expires = datetime.now() + timedelta(hours=23)
+            
+            _LOGGER.info("Access token refreshed, expires in 23 hours")
+
     def _get_headers(self) -> dict[str, str]:
         """Get request headers."""
         return {
-            "Authorization": f"Bearer {self._api_secret}",
+            "Authorization": f"Bearer {self._access_token}",
             "Content-Type": "application/json",
         }
 
@@ -74,6 +106,9 @@ class GoCardlessAPIClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Make an API request with rate limit checking."""
+        # Ensure we have a valid token
+        await self._ensure_token()
+        
         if rate_limit_key and max_per_day:
             if not await self._check_rate_limit(rate_limit_key, max_per_day):
                 raise Exception(f"Rate limit exceeded for {rate_limit_key}")

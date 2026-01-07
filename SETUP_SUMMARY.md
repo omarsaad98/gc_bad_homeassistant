@@ -35,8 +35,8 @@ custom_components/gc_bad/
 - Handles 429 (rate limit) and 401 (auth) errors gracefully
 
 ✅ **Config Flow with OAuth**
-- Initial setup: Enter API secret key
-- Validates API key before accepting
+- Initial setup: Enter Secret ID and Secret Key
+- Validates credentials and generates access token
 - Uses `pycountry` for country selection (not hardcoded!)
 - Bank selection from GoCardless institutions
 - **Full OAuth callback handler implemented!**

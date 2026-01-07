@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "GoCardless Bank Account Data",
-        "description": "Enter your GoCardless API secret key to get started.",
+        "description": "Enter your GoCardless API credentials to get started.",
         "data": {
-          "api_secret": "API Secret Key"
+          "secret_id": "Secret ID",
+          "secret_key": "Secret Key"
         }
       }
     },
