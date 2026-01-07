@@ -253,6 +253,11 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
                 # Store requisition ID for later verification
                 self._requisition_id = requisition["id"]
                 
+                # Also store in flow context to persist across flow resumptions
+                if not hasattr(self, "_flow_context"):
+                    self._flow_context = {}
+                self._flow_context["requisition_id"] = requisition["id"]
+                
                 _LOGGER.info(
                     "Created requisition %s for institution %s",
                     self._requisition_id,
@@ -278,7 +283,18 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Complete the authorization after user returns from bank."""
-        if self._api_client is None or self._requisition_id is None:
+        # Restore requisition_id from flow context if instance variable is lost
+        if self._requisition_id is None and hasattr(self, "_flow_context"):
+            self._requisition_id = self._flow_context.get("requisition_id")
+        
+        # Ensure API client is initialized
+        if self._api_client is None:
+            secret_id = self.config_entry.data[CONF_SECRET_ID]
+            secret_key = self.config_entry.data[CONF_SECRET_KEY]
+            self._api_client = GoCardlessAPIClient(self.hass, secret_id, secret_key)
+        
+        if self._requisition_id is None:
+            _LOGGER.error("Requisition ID not found in flow context")
             return self.async_abort(reason="missing_configuration")
         
         # Verify the requisition was successfully authorized

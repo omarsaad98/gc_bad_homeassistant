@@ -28,29 +28,43 @@ class GoCardlessAuthCallbackView(HomeAssistantView):
         GoCardless redirects here after user completes bank authorization.
         The URL will contain query parameters with requisition info.
         """
-        # Get the reference parameter (our flow_id) from the query
+        # Get the flow_id from the query (we added it to the redirect URL)
         flow_id = request.query.get("flow_id")
-        requisition_id = request.query.get("ref")
-        
-        if not flow_id:
-            _LOGGER.error("No flow ID in callback")
-            return self._error_response("Missing flow ID")
+        # GoCardless may also send a 'ref' parameter with the requisition reference
+        requisition_ref = request.query.get("ref")
         
         _LOGGER.info(
-            "Received OAuth callback for flow %s (requisition: %s)",
+            "Received OAuth callback - flow_id: %s, ref: %s, all params: %s",
             flow_id,
-            requisition_id,
+            requisition_ref,
+            dict(request.query),
         )
         
+        if not flow_id:
+            _LOGGER.error("No flow ID in callback URL. Query params: %s", dict(request.query))
+            return self._error_response("Missing flow ID in callback URL")
+        
         try:
-            # Signal the config flow that authorization is complete
-            await self.hass.config_entries.flow.async_configure(
+            # Get the flow to verify it exists
+            flow = await self.hass.config_entries.flow.async_get(flow_id)
+            if flow is None:
+                _LOGGER.error("Flow %s not found - may have expired", flow_id)
+                return self._error_response("Flow not found or expired. Please try again.")
+            
+            _LOGGER.info("Resuming flow %s (type: %s, handler: %s)", flow_id, type(flow).__name__, flow.handler)
+            
+            # Resume the flow - this should trigger async_step_authorize_complete
+            # When using async_external_step, resuming the flow automatically calls the _complete step
+            result = await self.hass.config_entries.flow.async_configure(
                 flow_id=flow_id,
                 user_input={},
             )
+            
+            _LOGGER.info("Flow resume completed. Result type: %s", result.get("type") if isinstance(result, dict) else type(result))
+            
         except Exception as err:
-            _LOGGER.error("Failed to complete config flow: %s", err)
-            return self._error_response(str(err))
+            _LOGGER.exception("Failed to complete config flow: %s", err)
+            return self._error_response(f"Failed to complete authorization: {str(err)}")
         
         return self._success_response()
     
