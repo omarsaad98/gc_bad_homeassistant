@@ -9,8 +9,9 @@ from typing import Any
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 
-from .const import API_BASE_URL
+from .const import API_BASE_URL, STORAGE_KEY, STORAGE_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,23 +27,99 @@ class GoCardlessAPIClient:
         self._session = async_get_clientsession(hass)
         self._base_url = API_BASE_URL
         self._access_token: str | None = None
+        self._refresh_token: str | None = None
         self._token_expires: datetime | None = None
+        self._refresh_expires: datetime | None = None
         
         # Rate limit tracking per endpoint
         self._rate_limits: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
+        
+        # Storage for persistence
+        self._store = Store(
+            hass,
+            STORAGE_VERSION,
+            f"{STORAGE_KEY}_{secret_id[:8]}",
+        )
+        self._storage_loaded = False
+
+    async def _load_storage(self) -> None:
+        """Load tokens and rate limits from storage."""
+        if self._storage_loaded:
+            return
+        
+        data = await self._store.async_load()
+        if data:
+            # Load tokens
+            tokens = data.get("tokens", {})
+            if tokens:
+                self._access_token = tokens.get("access_token")
+                self._refresh_token = tokens.get("refresh_token")
+                
+                # Parse expiry times
+                if tokens.get("access_expires"):
+                    self._token_expires = datetime.fromisoformat(tokens["access_expires"])
+                if tokens.get("refresh_expires"):
+                    self._refresh_expires = datetime.fromisoformat(tokens["refresh_expires"])
+                
+                _LOGGER.info("Loaded tokens from storage (expires: %s)", self._token_expires)
+            
+            # Load rate limits
+            rate_limits = data.get("rate_limits", {})
+            for key, limit_data in rate_limits.items():
+                if limit_data.get("reset_time"):
+                    limit_data["reset_time"] = datetime.fromisoformat(limit_data["reset_time"])
+            self._rate_limits = rate_limits
+            
+            if rate_limits:
+                _LOGGER.info("Loaded %d rate limit entries from storage", len(rate_limits))
+        
+        self._storage_loaded = True
+
+    async def _save_storage(self) -> None:
+        """Save tokens and rate limits to storage."""
+        data = {
+            "tokens": {
+                "access_token": self._access_token,
+                "refresh_token": self._refresh_token,
+                "access_expires": self._token_expires.isoformat() if self._token_expires else None,
+                "refresh_expires": self._refresh_expires.isoformat() if self._refresh_expires else None,
+            },
+            "rate_limits": {
+                key: {
+                    "count": limit_data["count"],
+                    "reset_time": limit_data["reset_time"].isoformat() if isinstance(limit_data["reset_time"], datetime) else limit_data["reset_time"],
+                }
+                for key, limit_data in self._rate_limits.items()
+            },
+        }
+        
+        await self._store.async_save(data)
+        _LOGGER.debug("Saved tokens and rate limits to storage")
 
     async def _ensure_token(self) -> None:
         """Ensure we have a valid access token."""
+        # Load from storage if not yet loaded
+        await self._load_storage()
+        
         if self._access_token and self._token_expires:
             if datetime.now() < self._token_expires:
                 return  # Token still valid
         
-        # Get new token
-        await self._refresh_token()
+        # Try refresh token if available
+        if self._refresh_token and self._refresh_expires:
+            if datetime.now() < self._refresh_expires:
+                try:
+                    await self._refresh_access_token()
+                    return
+                except Exception as err:
+                    _LOGGER.warning("Failed to refresh token: %s", err)
+        
+        # Get new token pair
+        await self._get_new_token()
 
-    async def _refresh_token(self) -> None:
-        """Get a new access token using secret ID and key."""
+    async def _get_new_token(self) -> None:
+        """Get a new token pair using secret ID and key."""
         url = f"{self._base_url}/api/v2/token/new/"
         
         async with self._session.post(
@@ -56,10 +133,43 @@ class GoCardlessAPIClient:
             data = await response.json()
             
             self._access_token = data["access"]
-            # Token typically expires in 24 hours, refresh before that
-            self._token_expires = datetime.now() + timedelta(hours=23)
+            self._refresh_token = data.get("refresh")
             
-            _LOGGER.info("Access token refreshed, expires in 23 hours")
+            # Tokens typically expire in seconds from now
+            access_expires_in = data.get("access_expires", 86400)  # Default 24h
+            refresh_expires_in = data.get("refresh_expires", 2592000)  # Default 30d
+            
+            self._token_expires = datetime.now() + timedelta(seconds=access_expires_in - 60)  # 1 min buffer
+            self._refresh_expires = datetime.now() + timedelta(seconds=refresh_expires_in)
+            
+            _LOGGER.info(
+                "New token pair obtained (access expires: %s, refresh expires: %s)",
+                self._token_expires,
+                self._refresh_expires,
+            )
+            
+            # Save to storage
+            await self._save_storage()
+
+    async def _refresh_access_token(self) -> None:
+        """Refresh access token using refresh token."""
+        url = f"{self._base_url}/api/v2/token/refresh/"
+        
+        async with self._session.post(
+            url,
+            json={"refresh": self._refresh_token},
+        ) as response:
+            response.raise_for_status()
+            data = await response.json()
+            
+            self._access_token = data["access"]
+            access_expires_in = data.get("access_expires", 86400)
+            self._token_expires = datetime.now() + timedelta(seconds=access_expires_in - 60)
+            
+            _LOGGER.info("Access token refreshed using refresh token (expires: %s)", self._token_expires)
+            
+            # Save to storage
+            await self._save_storage()
 
     def _get_headers(self) -> dict[str, str]:
         """Get request headers."""
@@ -70,6 +180,9 @@ class GoCardlessAPIClient:
 
     async def _check_rate_limit(self, endpoint_key: str, max_per_day: int) -> bool:
         """Check if we can make a request based on rate limits."""
+        # Load storage first if not yet loaded
+        await self._load_storage()
+        
         async with self._lock:
             now = datetime.now()
             if endpoint_key not in self._rate_limits:
@@ -95,6 +208,10 @@ class GoCardlessAPIClient:
                 return False
             
             limit_info["count"] += 1
+            
+            # Save updated rate limits to storage
+            await self._save_storage()
+            
             return True
 
     async def _request(
@@ -250,4 +367,15 @@ class GoCardlessAPIClient:
         except Exception as err:
             _LOGGER.error("Failed to delete requisition %s: %s", requisition_id, err)
             return False
+
+    async def clear_storage(self) -> None:
+        """Clear stored tokens and rate limits (for testing/reset)."""
+        await self._store.async_remove()
+        self._access_token = None
+        self._refresh_token = None
+        self._token_expires = None
+        self._refresh_expires = None
+        self._rate_limits = {}
+        self._storage_loaded = False
+        _LOGGER.info("Cleared all stored tokens and rate limits")
 

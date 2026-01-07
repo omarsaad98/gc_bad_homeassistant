@@ -26,6 +26,8 @@ SCOPE_DETAILS = "details"
 SCOPE_TRANSACTIONS = "transactions"
 
 # Storage keys
-STORAGE_KEY = f"{DOMAIN}.storage"
+STORAGE_KEY = f"{DOMAIN}_storage"
 STORAGE_VERSION = 1
+STORAGE_KEY_TOKENS = "tokens"
+STORAGE_KEY_RATE_LIMITS = "rate_limits"
 
