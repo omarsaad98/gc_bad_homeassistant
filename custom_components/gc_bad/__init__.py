@@ -41,6 +41,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
     
+    # Ensure all accounts have details before creating sensors
+    # This is needed for proper sensor naming and unique_ids
+    if coordinator.data and "accounts" in coordinator.data:
+        for account_id in coordinator.data["accounts"]:
+            account_data = coordinator.data["accounts"][account_id]
+            if not account_data.get("details"):
+                _LOGGER.info("Fetching details for account %s before sensor creation", account_id)
+                await coordinator.async_update_account_details(account_id)
+    
     # Store coordinator in hass.data
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {

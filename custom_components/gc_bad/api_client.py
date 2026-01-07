@@ -189,6 +189,7 @@ class GoCardlessAPIClient:
                 self._rate_limits[endpoint_key] = {
                     "count": 0,
                     "reset_time": now + timedelta(days=1),
+                    "api_limit": None,  # Will be set from API headers
                 }
             
             limit_info = self._rate_limits[endpoint_key]
@@ -197,22 +198,63 @@ class GoCardlessAPIClient:
             if now >= limit_info["reset_time"]:
                 limit_info["count"] = 0
                 limit_info["reset_time"] = now + timedelta(days=1)
+                limit_info["api_limit"] = None  # Reset API limit too
+            
+            # Use API-provided limit if available, otherwise use our conservative limit
+            effective_limit = limit_info.get("api_limit") or max_per_day
             
             # Check if we can make the request
-            if limit_info["count"] >= max_per_day:
+            if limit_info["count"] >= effective_limit:
                 _LOGGER.warning(
-                    "Rate limit reached for %s. Reset at %s",
+                    "Rate limit reached for %s. Count: %d/%d. Reset at %s",
                     endpoint_key,
+                    limit_info["count"],
+                    effective_limit,
                     limit_info["reset_time"],
                 )
                 return False
             
             limit_info["count"] += 1
             
+            _LOGGER.debug(
+                "Rate limit check for %s: %d/%d used",
+                endpoint_key,
+                limit_info["count"],
+                effective_limit,
+            )
+            
             # Save updated rate limits to storage
             await self._save_storage()
             
             return True
+
+    def _update_rate_limit_from_headers(
+        self, endpoint_key: str, headers: dict
+    ) -> None:
+        """Update rate limit info from API response headers."""
+        if not endpoint_key or endpoint_key not in self._rate_limits:
+            return
+        
+        # Extract the account-specific limit from headers
+        if "http_x_ratelimit_account_success_limit" in headers:
+            try:
+                api_limit = int(headers["http_x_ratelimit_account_success_limit"])
+                
+                # Apply 25% safety buffer to API limit
+                buffered_limit = max(1, int(api_limit * 0.75))
+                
+                # Update the limit if different
+                if self._rate_limits[endpoint_key].get("api_limit") != buffered_limit:
+                    self._rate_limits[endpoint_key]["api_limit"] = buffered_limit
+                    _LOGGER.info(
+                        "Updated rate limit for %s from API headers: %d (API: %d, buffered: %d)",
+                        endpoint_key,
+                        buffered_limit,
+                        api_limit,
+                        buffered_limit,
+                    )
+            except (ValueError, TypeError) as err:
+                _LOGGER.debug("Could not parse rate limit from headers: %s", err)
 
     async def _request(
         self,
@@ -275,6 +317,9 @@ class GoCardlessAPIClient:
                             remaining,
                             limit,
                         )
+                        
+                        # Update our internal rate limit tracking with API data
+                        self._update_rate_limit_from_headers(rate_limit_key, response.headers)
                         
                         # Warn if getting low (sandbox will show 200, real accounts show 2-10)
                         if limit < 50 and remaining <= 1:  # Real account with low remaining
