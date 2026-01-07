@@ -113,14 +113,46 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
                         self._institution_names[inst_id] = inst_info.get("name", inst_id)
                         _LOGGER.debug("Cached institution name: %s = %s", inst_id, inst_info.get("name"))
             
-            return {
+            # Store the result temporarily so _populate_missing_data can access it
+            temp_result = {
                 "requisitions": requisitions,
                 "accounts": accounts_data,
                 "institution_names": self._institution_names,
             }
             
+            # Update self.data temporarily so populate method can work
+            if not self.data:
+                self.data = temp_result
+            else:
+                self.data.update(temp_result)
+            
+            # Check for accounts with missing data and fetch it
+            await self._populate_missing_data(accounts_data)
+            
+            # Return updated data
+            return self.data
+            
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
+
+    async def _populate_missing_data(self, accounts_data: dict[str, Any]) -> None:
+        """Populate missing balance/details data for accounts."""
+        for account_id, account_info in accounts_data.items():
+            # Check if details are missing
+            if not account_info.get("details"):
+                _LOGGER.info("Fetching missing details for account %s", account_id)
+                try:
+                    await self.async_update_account_details(account_id)
+                except Exception as err:
+                    _LOGGER.error("Failed to fetch initial details for %s: %s", account_id, err)
+            
+            # Check if balances are missing
+            if not account_info.get("balances"):
+                _LOGGER.info("Fetching missing balances for account %s", account_id)
+                try:
+                    await self.async_update_account_balances(account_id)
+                except Exception as err:
+                    _LOGGER.error("Failed to fetch initial balances for %s: %s", account_id, err)
 
     async def async_update_account_details(self, account_id: str) -> dict[str, Any] | None:
         """Update account details for a specific account."""

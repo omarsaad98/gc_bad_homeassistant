@@ -63,35 +63,56 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._account_id = account_id
         
-        # Get account name and resourceId from details if available
-        account_name = None
+        # Get resourceId from details if available
         resource_id = None
         if account_data.get("details"):
             account_info = account_data["details"].get("account", {})
-            account_name = account_info.get("name")
             resource_id = account_info.get("resourceId")
-        
-        # Get institution name from institution_id
-        institution_id = account_data.get("institution_id", "")
-        # Extract readable name from institution_id (e.g., "SANDBOXFINANCE_SFIN0000" -> "Sandboxfinance")
-        institution_name = institution_id.split("_")[0].title() if institution_id else None
         
         # Use resourceId for unique_id if available, otherwise use account_id
         self._attr_unique_id = f"{resource_id or account_id}_balance"
         
-        # Build name with institution and account name
-        if institution_name and account_name:
-            self._attr_name = f"{institution_name} {account_name} Balance"
-        elif account_name:
-            self._attr_name = f"{account_name} Balance"
-        elif institution_name:
-            self._attr_name = f"{institution_name} Account {account_id[-4:]} Balance"
-        else:
-            self._attr_name = f"Account {account_id[-4:]} Balance"
-        
+        # Don't set _attr_name here - use dynamic name property instead
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
         self._last_balance_update: datetime | None = None
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor (dynamic based on current data)."""
+        if not self.coordinator.data:
+            return f"Account {self._account_id[-4:]} Balance"
+        
+        account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
+        if not account_data:
+            return f"Account {self._account_id[-4:]} Balance"
+        
+        # Get account name from details
+        account_name = None
+        if account_data.get("details"):
+            account_info = account_data["details"].get("account", {})
+            account_name = account_info.get("name")
+        
+        # Get institution name from coordinator cache
+        institution_id = account_data.get("institution_id", "")
+        institution_name = None
+        if institution_id:
+            institution_names = self.coordinator.data.get("institution_names", {})
+            institution_name = institution_names.get(institution_id)
+            
+            # Fallback: Extract from institution_id
+            if not institution_name:
+                institution_name = institution_id.split("_")[0].title()
+        
+        # Build name with institution and account name
+        if institution_name and account_name:
+            return f"{institution_name} {account_name} Balance"
+        elif account_name:
+            return f"{account_name} Balance"
+        elif institution_name:
+            return f"{institution_name} Account {self._account_id[-4:]} Balance"
+        else:
+            return f"Account {self._account_id[-4:]} Balance"
 
     @property
     def native_value(self) -> float | None:
@@ -169,29 +190,15 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
         return attributes
 
     async def async_added_to_hass(self) -> None:
-        """When entity is added to hass, schedule initial balance data fetch."""
+        """When entity is added to hass, ensure we have balance data."""
         await super().async_added_to_hass()
-        # Don't fetch immediately on startup to avoid rate limits
-        # Instead, check if we have cached data from storage
+        # The coordinator now populates missing data automatically
+        # Just mark when we're ready
         if self.coordinator.data:
             account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
             if account_data and account_data.get("balances"):
-                # We have cached data, don't fetch immediately
-                _LOGGER.info("Using cached balance data for %s", self._account_id)
-                return
-        
-        # No cached data, fetch but stagger the requests
-        # Wait a bit to avoid all sensors fetching at once on startup
-        import random
-        delay = random.uniform(5, 30)  # Random 5-30 second delay
-        _LOGGER.info("Scheduling initial balance fetch for %s in %.1f seconds", self._account_id, delay)
-        
-        async def delayed_fetch():
-            await asyncio.sleep(delay)
-            await self.coordinator.async_update_account_balances(self._account_id)
-            self._last_balance_update = datetime.now()
-        
-        self.hass.async_create_task(delayed_fetch())
+                self._last_balance_update = datetime.now()
+                _LOGGER.debug("Balance sensor ready for %s", self._account_id)
 
     async def async_update(self) -> None:
         """Update the sensor - respecting rate limits."""
@@ -230,64 +237,65 @@ class GoCardlessAccountDetailsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._account_id = account_id
         
-        # Get account name and resourceId from details if available
-        account_name = None
+        # Use resourceId for unique_id if available from account_data
         resource_id = None
         if account_data.get("details"):
             account_info = account_data["details"].get("account", {})
-            account_name = account_info.get("name")
             resource_id = account_info.get("resourceId")
-        
-        # Get institution name from coordinator cache
-        institution_id = account_data.get("institution_id", "")
-        institution_name = None
-        if institution_id and coordinator.data:
-            institution_names = coordinator.data.get("institution_names", {})
-            institution_name = institution_names.get(institution_id)
-        
-        # Fallback: Extract from institution_id if not in cache
-        if not institution_name and institution_id:
-            institution_name = institution_id.split("_")[0].title()
         
         # Use resourceId for unique_id if available, otherwise use account_id
         self._attr_unique_id = f"{resource_id or account_id}_details"
         
-        # Build name with institution and account name
-        if institution_name and account_name:
-            self._attr_name = f"{institution_name} {account_name} Details"
-        elif account_name:
-            self._attr_name = f"{account_name} Details"
-        elif institution_name:
-            self._attr_name = f"{institution_name} Account {account_id[-4:]} Details"
-        else:
-            self._attr_name = f"Account {account_id[-4:]} Details"
-        
+        # Name will be set dynamically in the name property
         self._last_details_update: datetime | None = None
 
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor (dynamic based on current data)."""
+        if not self.coordinator.data:
+            return f"Account {self._account_id[-4:]} Details"
+        
+        account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
+        if not account_data:
+            return f"Account {self._account_id[-4:]} Details"
+        
+        # Get account name from details
+        account_name = None
+        if account_data.get("details"):
+            account_info = account_data["details"].get("account", {})
+            account_name = account_info.get("name")
+        
+        # Get institution name from coordinator cache
+        institution_id = account_data.get("institution_id", "")
+        institution_name = None
+        if institution_id:
+            institution_names = self.coordinator.data.get("institution_names", {})
+            institution_name = institution_names.get(institution_id)
+            
+            # Fallback: Extract from institution_id
+            if not institution_name:
+                institution_name = institution_id.split("_")[0].title()
+        
+        # Build name with institution and account name
+        if institution_name and account_name:
+            return f"{institution_name} {account_name} Details"
+        elif account_name:
+            return f"{account_name} Details"
+        elif institution_name:
+            return f"{institution_name} Account {self._account_id[-4:]} Details"
+        else:
+            return f"Account {self._account_id[-4:]} Details"
+
     async def async_added_to_hass(self) -> None:
-        """When entity is added to hass, schedule initial details data fetch."""
+        """When entity is added to hass, ensure we have details data."""
         await super().async_added_to_hass()
-        # Don't fetch immediately on startup to avoid rate limits
-        # Instead, check if we have cached data from storage
+        # The coordinator now populates missing data automatically
+        # Just mark when we're ready
         if self.coordinator.data:
             account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
             if account_data and account_data.get("details"):
-                # We have cached data, don't fetch immediately
-                _LOGGER.info("Using cached details data for %s", self._account_id)
-                return
-        
-        # No cached data, fetch but stagger the requests
-        # Wait a bit to avoid all sensors fetching at once on startup
-        import random
-        delay = random.uniform(10, 40)  # Random 10-40 second delay, offset from balances
-        _LOGGER.info("Scheduling initial details fetch for %s in %.1f seconds", self._account_id, delay)
-        
-        async def delayed_fetch():
-            await asyncio.sleep(delay)
-            await self.coordinator.async_update_account_details(self._account_id)
-            self._last_details_update = datetime.now()
-        
-        self.hass.async_create_task(delayed_fetch())
+                self._last_details_update = datetime.now()
+                _LOGGER.debug("Details sensor ready for %s", self._account_id)
 
     @property
     def native_value(self) -> str | None:
