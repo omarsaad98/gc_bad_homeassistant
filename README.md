@@ -57,6 +57,19 @@ For more detailed information, please see:
 - Python 3.12+
 - A valid GoCardless Secret ID and Secret Key.
 
+## ⚠️ Warning
+
+**This project was entirely vibe coded.** 
+
+What does that mean? It means this integration was built through a combination of:
+- Reading API docs when things broke
+- Trial and error
+- "This feels right" moments
+- Debugging in production
+- Occasional web searches when stuck
+
+While it works (mostly), it may not follow all best practices, have comprehensive error handling everywhere, or be optimized for every edge case. Use at your own risk, and feel free to submit issues or PRs if you find problems or want to improve things.
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
