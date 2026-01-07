@@ -237,10 +237,53 @@ class GoCardlessAPIClient:
             async with self._session.request(
                 method, url, headers=headers, **kwargs
             ) as response:
-                # Check rate limit headers
-                if "X-RateLimit-Remaining" in response.headers:
-                    remaining = response.headers["X-RateLimit-Remaining"]
-                    _LOGGER.debug("Rate limit remaining: %s", remaining)
+                # Extract rate limit headers from GoCardless
+                # Note: Headers are lowercase with underscores in aiohttp
+                rate_limit_info = {}
+                
+                # General rate limits (per minute)
+                if "http_x_ratelimit_limit" in response.headers:
+                    rate_limit_info["general_limit"] = response.headers["http_x_ratelimit_limit"]
+                if "http_x_ratelimit_remaining" in response.headers:
+                    rate_limit_info["general_remaining"] = response.headers["http_x_ratelimit_remaining"]
+                if "http_x_ratelimit_reset" in response.headers:
+                    rate_limit_info["general_reset_seconds"] = response.headers["http_x_ratelimit_reset"]
+                
+                # Account-specific rate limits (per day)
+                if "http_x_ratelimit_account_success_limit" in response.headers:
+                    rate_limit_info["account_limit"] = response.headers["http_x_ratelimit_account_success_limit"]
+                if "http_x_ratelimit_account_success_remaining" in response.headers:
+                    rate_limit_info["account_remaining"] = response.headers["http_x_ratelimit_account_success_remaining"]
+                if "http_x_ratelimit_account_success_reset" in response.headers:
+                    rate_limit_info["account_reset_seconds"] = response.headers["http_x_ratelimit_account_success_reset"]
+                
+                if rate_limit_info:
+                    _LOGGER.info(
+                        "API rate limit info for %s: %s",
+                        endpoint,
+                        rate_limit_info,
+                    )
+                    
+                    # Check account-specific remaining (this is the important one for daily limits)
+                    if rate_limit_key and "http_x_ratelimit_account_success_remaining" in response.headers:
+                        remaining = int(response.headers["http_x_ratelimit_account_success_remaining"])
+                        limit = int(response.headers.get("http_x_ratelimit_account_success_limit", 0))
+                        
+                        _LOGGER.info(
+                            "Account rate limit for %s: %d/%d remaining",
+                            rate_limit_key,
+                            remaining,
+                            limit,
+                        )
+                        
+                        # Warn if getting low (sandbox will show 200, real accounts show 2-10)
+                        if limit < 50 and remaining <= 1:  # Real account with low remaining
+                            _LOGGER.warning(
+                                "LOW RATE LIMIT: Only %d requests remaining for %s (limit: %d)",
+                                remaining,
+                                rate_limit_key,
+                                limit,
+                            )
                 
                 response.raise_for_status()
                 return await response.json()
