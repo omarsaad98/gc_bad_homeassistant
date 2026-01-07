@@ -1,6 +1,7 @@
 """Sensor platform for GoCardless Bank Account Data integration."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -143,11 +144,29 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
         return attributes
 
     async def async_added_to_hass(self) -> None:
-        """When entity is added to hass, fetch initial balance data."""
+        """When entity is added to hass, schedule initial balance data fetch."""
         await super().async_added_to_hass()
-        # Fetch initial balance data
-        await self.coordinator.async_update_account_balances(self._account_id)
-        self._last_balance_update = datetime.now()
+        # Don't fetch immediately on startup to avoid rate limits
+        # Instead, check if we have cached data from storage
+        if self.coordinator.data:
+            account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
+            if account_data and account_data.get("balances"):
+                # We have cached data, don't fetch immediately
+                _LOGGER.info("Using cached balance data for %s", self._account_id)
+                return
+        
+        # No cached data, fetch but stagger the requests
+        # Wait a bit to avoid all sensors fetching at once on startup
+        import random
+        delay = random.uniform(5, 30)  # Random 5-30 second delay
+        _LOGGER.info("Scheduling initial balance fetch for %s in %.1f seconds", self._account_id, delay)
+        
+        async def delayed_fetch():
+            await asyncio.sleep(delay)
+            await self.coordinator.async_update_account_balances(self._account_id)
+            self._last_balance_update = datetime.now()
+        
+        self.hass.async_create_task(delayed_fetch())
 
     async def async_update(self) -> None:
         """Update the sensor - respecting rate limits."""
@@ -190,11 +209,29 @@ class GoCardlessAccountDetailsSensor(CoordinatorEntity, SensorEntity):
         self._last_details_update: datetime | None = None
 
     async def async_added_to_hass(self) -> None:
-        """When entity is added to hass, fetch initial details data."""
+        """When entity is added to hass, schedule initial details data fetch."""
         await super().async_added_to_hass()
-        # Fetch initial details data
-        await self.coordinator.async_update_account_details(self._account_id)
-        self._last_details_update = datetime.now()
+        # Don't fetch immediately on startup to avoid rate limits
+        # Instead, check if we have cached data from storage
+        if self.coordinator.data:
+            account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
+            if account_data and account_data.get("details"):
+                # We have cached data, don't fetch immediately
+                _LOGGER.info("Using cached details data for %s", self._account_id)
+                return
+        
+        # No cached data, fetch but stagger the requests
+        # Wait a bit to avoid all sensors fetching at once on startup
+        import random
+        delay = random.uniform(10, 40)  # Random 10-40 second delay, offset from balances
+        _LOGGER.info("Scheduling initial details fetch for %s in %.1f seconds", self._account_id, delay)
+        
+        async def delayed_fetch():
+            await asyncio.sleep(delay)
+            await self.coordinator.async_update_account_details(self._account_id)
+            self._last_details_update = datetime.now()
+        
+        self.hass.async_create_task(delayed_fetch())
 
     @property
     def native_value(self) -> str | None:

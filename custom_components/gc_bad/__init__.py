@@ -36,7 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api_client = GoCardlessAPIClient(hass, secret_id, secret_key)
     
     # Create data update coordinator
-    coordinator = GoCardlessDataUpdateCoordinator(hass, api_client)
+    coordinator = GoCardlessDataUpdateCoordinator(hass, api_client, entry.entry_id)
     
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
