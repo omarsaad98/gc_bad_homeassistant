@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "GoCardless Bank Account Data",
+        "description": "Enter your GoCardless API secret key to get started.",
+        "data": {
+          "api_secret": "API Secret Key"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid API secret. Please check your credentials.",
+      "cannot_connect": "Unable to connect to GoCardless API.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This integration is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "GoCardless Bank Account Data Options",
+        "data": {
+          "add_requisition": "Add New Bank Connection"
+        }
+      },
+      "select_country": {
+        "title": "Select Country",
+        "description": "Choose the country where your bank is located.",
+        "data": {
+          "country": "Country"
+        }
+      },
+      "select_institution": {
+        "title": "Select Bank",
+        "description": "Choose your bank from the list.",
+        "data": {
+          "institution_id": "Bank"
+        }
+      }
+    }
+  }
+}
+

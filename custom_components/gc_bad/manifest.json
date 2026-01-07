@@ -1,0 +1,12 @@
+{
+  "domain": "gc_bad",
+  "name": "GoCardless Bank Account Data",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/home-assistant/example-custom-config/tree/master/custom_components/gc_bad/",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
+

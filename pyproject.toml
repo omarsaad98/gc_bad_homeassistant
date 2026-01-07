@@ -1,0 +1,25 @@
+[project]
+name = "gc-bad-homeassistant"
+version = "0.1.0"
+description = "Home Assistant integration for GoCardless Bank Account Data API"
+readme = "README.md"
+authors = [
+    { name = "Omar Saad", email = "omar.saad0705@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.11.11",
+    "homeassistant>=2024.12.5",
+    "pycountry>=24.6.1",
+]
+keywords = ["homeassistant", "gocardless", "banking", "integration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Home Automation",
+    "Programming Language :: Python :: 3.12",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.13,<0.10.0"]
+build-backend = "uv_build"
