@@ -1,168 +1,66 @@
-# GoCardless Bank Account Data - Home Assistant Integration
+# GoCardless Bank Account Data for Home Assistant
 
-A Home Assistant custom integration for accessing bank account data through the GoCardless Bank Account Data API.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)]()
+[![Built with uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+
+A robust Home Assistant custom integration for accessing bank account data through the GoCardless (formerly Nordigen) Bank Account Data API.
 
 ## Features
 
-- 🏦 **Multiple Bank Accounts**: View balances and details from all connected bank accounts
-- 🌍 **Multi-Country Support**: Connect banks from any country using pycountry
-- 🔐 **OAuth Flow**: Secure bank connection through OAuth2
-- ⏱️ **Rate Limit Management**: Intelligent rate limiting to comply with GoCardless API restrictions
-- 📊 **Real-time Data**: Account balances, details, and transaction data
-- 🔄 **Easy Setup**: Simple configuration through Home Assistant UI
-
-## Rate Limits
-
-The integration is designed to respect GoCardless's aggressive rate limits:
-
-- **Account Balances**: Max 2 requests per day (updates every 12 hours)
-- **Account Details**: Max 2 requests per day (updates every 12 hours)
-- **Account Transactions**: Max 4 requests per day (updates every 6 hours)
-- **Requisitions List**: Updates every 30 minutes
+- 🏦 **Multiple Bank Accounts**: Automatically discovers and tracks all accounts across connected institutions.
+- 🌍 **Global Support**: Connect to 2,000+ banks across 30+ countries.
+- 🔐 **Secure OAuth2**: Built-in flow for secure bank authorization.
+- 🛡️ **Rate Limit Protection**: Advanced tracking and pre-emptive blocking to strictly adhere to GoCardless's aggressive daily limits.
+- 🔄 **State Persistence**: Tokens and account data survive Home Assistant restarts, ensuring instant data availability and zero-startup API overhead.
+- 📊 **Rich Sensor Data**: Provides balances, IBANs, owner names, and metadata for every account.
 
 ## Installation
 
-### Using uv (Development)
-
-1. Clone this repository
-2. Install dependencies:
-   ```bash
-   uv sync
-   ```
-
 ### Manual Installation
+1. Copy the `custom_components/gc_bad` directory to your Home Assistant's `custom_components` directory.
+2. Restart Home Assistant.
 
-1. Copy the `custom_components/gc_bad` directory to your Home Assistant's `custom_components` directory
-2. Restart Home Assistant
-
-### HACS (Future)
-
-This integration may be available through HACS in the future.
+### HACS
+*Coming soon!*
 
 ## Configuration
 
-1. Go to **Settings** → **Devices & Services** → **Add Integration**
-2. Search for "GoCardless Bank Account Data"
-3. Enter your **Secret ID**
-4. Enter your **Secret Key**
-5. Click Submit
+1. Go to **Settings** → **Devices & Services**.
+2. Click **Add Integration** and search for "GoCardless Bank Account Data".
+3. Enter your **Secret ID** and **Secret Key**.
+   - *Get these from the [GoCardless Developer Dashboard](https://gocardless.com).*
+4. To add specific banks, click **Configure** on the integration card and select **Add New Bank Connection**.
 
-### Getting Your API Credentials
+## Usage
 
-1. Sign up for a GoCardless account at [https://gocardless.com](https://gocardless.com)
-2. Navigate to the **Developers** → **API Keys** section
-3. Click **Create New Secret**
-4. You'll receive:
-   - **Secret ID** (your application identifier)
-   - **Secret Key** (your application password)
-5. **Save both immediately** - the Secret Key is only shown once!
+The integration creates two primary sensors for each account:
 
-## Adding Bank Connections
+### 1. Balance Sensor
+- **State**: Current balance amount.
+- **Attributes**: Account ID, Institution, Balance Type, Reference Date.
 
-After initial setup, you can add bank connections (requisitions):
+### 2. Details Sensor
+- **State**: Account IBAN or Name.
+- **Attributes**: Owner Name, Currency, Account Type, Product.
 
-1. Go to **Settings** → **Devices & Services**
-2. Find the "GoCardless Bank Account Data" integration
-3. Click **Configure**
-4. Select **Add New Bank Connection**
-5. Choose your country
-6. Select your bank from the list
-7. Complete the OAuth flow with your bank
+## Documentation
 
-## Sensors
+For more detailed information, please see:
+- [Architecture & Implementation](docs/architecture.md)
+- [OAuth & Bank Connections](docs/oauth.md)
+- [Testing & Development](docs/testing.md)
 
-The integration creates the following sensors for each connected bank account:
+## Requirements
 
-### Account Balance Sensor
-- **Entity ID**: `sensor.account_XXXX_balance`
-- **State**: Current account balance
-- **Attributes**:
-  - Account ID
-  - Requisition ID
-  - Institution ID
-  - Balance type
-  - Reference date
-
-### Account Details Sensor
-- **Entity ID**: `sensor.account_XXXX_details`
-- **State**: IBAN or account name
-- **Attributes**:
-  - Account ID
-  - IBAN
-  - Account name
-  - Currency
-  - Owner name
-  - Account status
-
-## API Documentation
-
-This integration uses the GoCardless Bank Account Data API v2. For more information:
-- [GoCardless API Documentation](https://developer.gocardless.com/bank-account-data/overview)
-- [API Reference](https://developer.gocardless.com/api-reference)
-
-## Development
-
-### Project Structure
-
-```
-custom_components/gc_bad/
-├── __init__.py           # Integration setup
-├── manifest.json         # Integration manifest
-├── const.py             # Constants and configuration
-├── config_flow.py       # Configuration flow (UI setup)
-├── coordinator.py       # Data update coordinator
-├── api_client.py        # GoCardless API client
-├── sensor.py            # Sensor entities
-└── strings.json         # UI strings
-```
-
-### Requirements
-
-- Python 3.12+
 - Home Assistant 2024.12+
-- GoCardless API Credentials (Secret ID + Secret Key)
-
-### Dependencies
-
-- `homeassistant` - Home Assistant core
-- `aiohttp` - Async HTTP client
-- `pycountry` - Country codes and names
-- `python-dotenv` - Environment variable management (for testing)
-
-## Troubleshooting
-
-### Rate Limit Errors
-
-If you encounter rate limit errors:
-- The integration automatically respects rate limits
-- Balance updates are limited to twice per day
-- Check logs for rate limit messages
-
-### Authentication Issues
-
-If authentication fails:
-- Verify your API secret key is correct
-- Ensure your GoCardless account is active
-- Check the Home Assistant logs for detailed error messages
-
-### No Institutions Found
-
-If no banks appear for your country:
-- Verify the country code is correct
-- Check if GoCardless supports banks in your country
-- Refer to [GoCardless supported institutions](https://gocardless.com/bank-account-data/institutions/)
+- Python 3.12+
+- A valid GoCardless Secret ID and Secret Key.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-## Support
+---
 
-For issues, questions, or contributions:
-- Open an issue on GitHub
-- Check the Home Assistant community forums
-
-## Disclaimer
-
-This is a third-party integration and is not affiliated with or endorsed by GoCardless. Use at your own risk.
-
+*Disclaimer: This is a third-party integration and is not affiliated with or endorsed by GoCardless.*
