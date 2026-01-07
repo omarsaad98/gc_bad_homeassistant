@@ -82,6 +82,9 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
                         # Start with cached data if available
                         if account_id in cached_accounts:
                             accounts_data[account_id] = cached_accounts[account_id]
+                            # Update requisition info in case it changed
+                            accounts_data[account_id]["requisition_id"] = requisition_id
+                            accounts_data[account_id]["institution_id"] = requisition.get("institution_id")
                             _LOGGER.debug("Restored cached data for account %s", account_id)
                         else:
                             # No cached data, initialize empty

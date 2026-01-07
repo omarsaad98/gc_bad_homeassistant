@@ -62,8 +62,33 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._account_id = account_id
-        self._attr_unique_id = f"{account_id}_balance"
-        self._attr_name = f"Account {account_id[-4:]} Balance"
+        
+        # Get account name and resourceId from details if available
+        account_name = None
+        resource_id = None
+        if account_data.get("details"):
+            account_info = account_data["details"].get("account", {})
+            account_name = account_info.get("name")
+            resource_id = account_info.get("resourceId")
+        
+        # Get institution name from institution_id
+        institution_id = account_data.get("institution_id", "")
+        # Extract readable name from institution_id (e.g., "SANDBOXFINANCE_SFIN0000" -> "Sandboxfinance")
+        institution_name = institution_id.split("_")[0].title() if institution_id else None
+        
+        # Use resourceId for unique_id if available, otherwise use account_id
+        self._attr_unique_id = f"{resource_id or account_id}_balance"
+        
+        # Build name with institution and account name
+        if institution_name and account_name:
+            self._attr_name = f"{institution_name} {account_name} Balance"
+        elif account_name:
+            self._attr_name = f"{account_name} Balance"
+        elif institution_name:
+            self._attr_name = f"{institution_name} Account {account_id[-4:]} Balance"
+        else:
+            self._attr_name = f"Account {account_id[-4:]} Balance"
+        
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
         self._last_balance_update: datetime | None = None
@@ -204,8 +229,33 @@ class GoCardlessAccountDetailsSensor(CoordinatorEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._account_id = account_id
-        self._attr_unique_id = f"{account_id}_details"
-        self._attr_name = f"Account {account_id[-4:]} Details"
+        
+        # Get account name and resourceId from details if available
+        account_name = None
+        resource_id = None
+        if account_data.get("details"):
+            account_info = account_data["details"].get("account", {})
+            account_name = account_info.get("name")
+            resource_id = account_info.get("resourceId")
+        
+        # Get institution name from institution_id
+        institution_id = account_data.get("institution_id", "")
+        # Extract readable name from institution_id (e.g., "SANDBOXFINANCE_SFIN0000" -> "Sandboxfinance")
+        institution_name = institution_id.split("_")[0].title() if institution_id else None
+        
+        # Use resourceId for unique_id if available, otherwise use account_id
+        self._attr_unique_id = f"{resource_id or account_id}_details"
+        
+        # Build name with institution and account name
+        if institution_name and account_name:
+            self._attr_name = f"{institution_name} {account_name} Details"
+        elif account_name:
+            self._attr_name = f"{account_name} Details"
+        elif institution_name:
+            self._attr_name = f"{institution_name} Account {account_id[-4:]} Details"
+        else:
+            self._attr_name = f"Account {account_id[-4:]} Details"
+        
         self._last_details_update: datetime | None = None
 
     async def async_added_to_hass(self) -> None:
