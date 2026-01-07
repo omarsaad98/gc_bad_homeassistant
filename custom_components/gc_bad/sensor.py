@@ -142,6 +142,13 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
         
         return attributes
 
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to hass, fetch initial balance data."""
+        await super().async_added_to_hass()
+        # Fetch initial balance data
+        await self.coordinator.async_update_account_balances(self._account_id)
+        self._last_balance_update = datetime.now()
+
     async def async_update(self) -> None:
         """Update the sensor - respecting rate limits."""
         # Only update if enough time has passed
@@ -181,6 +188,13 @@ class GoCardlessAccountDetailsSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{account_id}_details"
         self._attr_name = f"Account {account_id[-4:]} Details"
         self._last_details_update: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to hass, fetch initial details data."""
+        await super().async_added_to_hass()
+        # Fetch initial details data
+        await self.coordinator.async_update_account_details(self._account_id)
+        self._last_details_update = datetime.now()
 
     @property
     def native_value(self) -> str | None:

@@ -1,7 +1,5 @@
 # Test data and secrets
-tests/test_data/
 tests/test_data/tokens.json
-tests/test_data/api_responses/
 
 # Coverage reports
 .coverage
@@ -18,4 +16,4 @@ __pycache__/
 *.pyo
 *.pyd
 
-.env.example
+!.env.example

@@ -89,7 +89,7 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        super().__init__()
         self._api_client: GoCardlessAPIClient | None = None
         self._country: str | None = None
         self._institutions: list[dict[str, Any]] = []
