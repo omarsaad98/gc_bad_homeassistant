@@ -238,10 +238,16 @@ class GoCardlessAccountDetailsSensor(CoordinatorEntity, SensorEntity):
             account_name = account_info.get("name")
             resource_id = account_info.get("resourceId")
         
-        # Get institution name from institution_id
+        # Get institution name from coordinator cache
         institution_id = account_data.get("institution_id", "")
-        # Extract readable name from institution_id (e.g., "SANDBOXFINANCE_SFIN0000" -> "Sandboxfinance")
-        institution_name = institution_id.split("_")[0].title() if institution_id else None
+        institution_name = None
+        if institution_id and coordinator.data:
+            institution_names = coordinator.data.get("institution_names", {})
+            institution_name = institution_names.get(institution_id)
+        
+        # Fallback: Extract from institution_id if not in cache
+        if not institution_name and institution_id:
+            institution_name = institution_id.split("_")[0].title()
         
         # Use resourceId for unique_id if available, otherwise use account_id
         self._attr_unique_id = f"{resource_id or account_id}_details"

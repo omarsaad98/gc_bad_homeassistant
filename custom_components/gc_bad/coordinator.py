@@ -43,6 +43,9 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
             f"{STORAGE_KEY}_data_{entry_id}",
         )
         
+        # Cache institution names to avoid repeated API calls
+        self._institution_names: dict[str, str] = {}
+        
         super().__init__(
             hass,
             _LOGGER,
@@ -97,9 +100,23 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
                                 "transactions": None,
                             }
             
+            # Fetch institution names for linked accounts (cache for sensor naming)
+            unique_institutions = set(
+                acc.get("institution_id") for acc in accounts_data.values() 
+                if acc.get("institution_id")
+            )
+            
+            for inst_id in unique_institutions:
+                if inst_id and inst_id not in self._institution_names:
+                    inst_info = await self.api_client.get_institution(inst_id)
+                    if inst_info:
+                        self._institution_names[inst_id] = inst_info.get("name", inst_id)
+                        _LOGGER.debug("Cached institution name: %s = %s", inst_id, inst_info.get("name"))
+            
             return {
                 "requisitions": requisitions,
                 "accounts": accounts_data,
+                "institution_names": self._institution_names,
             }
             
         except Exception as err:

@@ -382,6 +382,14 @@ class GoCardlessAPIClient:
             _LOGGER.error("Failed to get institutions for %s: %s", country, err)
             return []
 
+    async def get_institution(self, institution_id: str) -> dict[str, Any] | None:
+        """Get details for a specific institution."""
+        try:
+            return await self._request("GET", f"/api/v2/institutions/{institution_id}/")
+        except Exception as err:
+            _LOGGER.error("Failed to get institution %s: %s", institution_id, err)
+            return None
+
     async def create_requisition(
         self,
         institution_id: str,
