@@ -166,14 +166,46 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
             )
             
             if self._selected_institution:
-                return await self.async_step_authorize()
+                # Ensure API client is initialized
+                if self._api_client is None:
+                    secret_id = self.config_entry.data[CONF_SECRET_ID]
+                    secret_key = self.config_entry.data[CONF_SECRET_KEY]
+                    self._api_client = GoCardlessAPIClient(self.hass, secret_id, secret_key)
+                
+                try:
+                    result = await self.async_step_authorize()
+                    # Check if result is an abort (dict with "type" key equal to "abort")
+                    if isinstance(result, dict) and result.get("type") == "abort":
+                        reason = result.get("reason", "requisition_failed")
+                        _LOGGER.error(
+                            "Authorization aborted for institution %s: %s",
+                            institution_id,
+                            reason,
+                        )
+                        # Map abort reasons to error keys (only requisition_failed is in both)
+                        if reason == "requisition_failed":
+                            errors["base"] = "requisition_failed"
+                        else:
+                            # For other abort reasons, use a generic error
+                            errors["base"] = "requisition_failed"
+                    else:
+                        return result
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Failed to start authorization for institution %s", institution_id)
+                    errors["base"] = "requisition_failed"
             else:
                 errors["base"] = "invalid_institution"
 
-        # Create institution choices
+        # Ensure institutions are loaded
+        if not self._institutions:
+            _LOGGER.error("No institutions available for selection")
+            if not errors:
+                errors["base"] = "no_institutions"
+        
+        # Create institution choices (empty dict if no institutions)
         institution_choices = {
             inst["id"]: inst["name"] for inst in self._institutions
-        }
+        } if self._institutions else {}
 
         return self.async_show_form(
             step_id="select_institution",
@@ -194,10 +226,21 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
 
         # Build callback URL with flow_id so we can complete the right flow
         # when the user returns from GoCardless
-        redirect_url = (
-            f"{self.hass.config.api.base_url}/api/gc_bad/callback"
-            f"?flow_id={self.flow_id}"
-        )
+        try:
+            # Use external_url if available, otherwise fall back to internal_url
+            base_url = self.hass.config.external_url or self.hass.config.internal_url
+            if not base_url:
+                _LOGGER.error("Home Assistant base URL is not configured (neither external_url nor internal_url)")
+                return self.async_abort(reason="missing_configuration")
+            
+            redirect_url = (
+                f"{base_url}/api/gc_bad/callback"
+                f"?flow_id={self.flow_id}"
+            )
+            _LOGGER.debug("Using redirect URL: %s", redirect_url)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.exception("Failed to build redirect URL: %s", err)
+            return self.async_abort(reason="missing_configuration")
         
         try:
             requisition = await self._api_client.create_requisition(
@@ -222,6 +265,10 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
                     url=requisition["link"],
                 )
             else:
+                _LOGGER.error(
+                    "Invalid requisition response: missing 'link' or 'id'. Response: %s",
+                    requisition,
+                )
                 return self.async_abort(reason="requisition_failed")
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Failed to create requisition")
