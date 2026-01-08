@@ -72,7 +72,7 @@ While it works (mostly), it may not follow all best practices, have comprehensiv
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNUv3 License. See the [LICENSE](LICENSE) file for details.
 
 ---
 
