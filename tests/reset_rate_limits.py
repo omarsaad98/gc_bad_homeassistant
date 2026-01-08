@@ -26,3 +26,4 @@ for storage_file in ha_storage.glob("gc_bad_storage_*.json"):
 print("\n[OK] Rate limit counters reset!")
 print("[INFO] Reload the integration in Home Assistant to apply")
 
+

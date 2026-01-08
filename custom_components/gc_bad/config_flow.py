@@ -140,6 +140,11 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
                 _LOGGER.exception("Failed to fetch institutions")
                 errors["base"] = "cannot_connect"
 
+        # Preserve the selected country when re-displaying the form
+        data = {}
+        if self._country is not None:
+            data["country"] = self._country
+
         return self.async_show_form(
             step_id="select_country",
             data_schema=vol.Schema(
@@ -147,6 +152,7 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Required("country"): vol.In(get_countries()),
                 }
             ),
+            data=data,
             errors=errors,
         )
 
