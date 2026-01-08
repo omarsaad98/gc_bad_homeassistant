@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 import pycountry
@@ -141,18 +142,15 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
                 errors["base"] = "cannot_connect"
 
         # Preserve the selected country when re-displaying the form
-        data = {}
-        if self._country is not None:
-            data["country"] = self._country
+        country_default = self._country if self._country is not None else vol.UNDEFINED
 
         return self.async_show_form(
             step_id="select_country",
             data_schema=vol.Schema(
                 {
-                    vol.Required("country"): vol.In(get_countries()),
+                    vol.Required("country", default=country_default): vol.In(get_countries()),
                 }
             ),
-            data=data,
             errors=errors,
         )
 
@@ -249,10 +247,12 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_abort(reason="missing_configuration")
         
         try:
+            reference = f"ha_{self.config_entry.entry_id}_{uuid.uuid4().hex[:8]}"
+
             requisition = await self._api_client.create_requisition(
                 institution_id=self._selected_institution["id"],
                 redirect_url=redirect_url,
-                reference=f"ha_{self.config_entry.entry_id}",
+                reference=reference,
             )
             
             if requisition and "link" in requisition and "id" in requisition:
