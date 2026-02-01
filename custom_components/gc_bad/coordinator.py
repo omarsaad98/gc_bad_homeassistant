@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api_client import GoCardlessAPIClient
 from .const import (
     DOMAIN,
+    IGNORED_INSTITUTION_PREFIXES,
     RATE_LIMIT_BALANCES,
     RATE_LIMIT_DETAILS,
     RATE_LIMIT_TRANSACTIONS,
@@ -94,6 +95,10 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
                 if status != "LN":  # LN = Linked
                     continue
                 
+                institution_id = requisition.get("institution_id", "")
+                if institution_id.startswith(IGNORED_INSTITUTION_PREFIXES):
+                    continue
+                
                 # Get accounts from this requisition
                 account_ids = requisition.get("accounts", [])
                 
@@ -104,14 +109,14 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
                             accounts_data[account_id] = cached_accounts[account_id]
                             # Update requisition info in case it changed
                             accounts_data[account_id]["requisition_id"] = requisition_id
-                            accounts_data[account_id]["institution_id"] = requisition.get("institution_id")
+                            accounts_data[account_id]["institution_id"] = institution_id
                             _LOGGER.debug("Restored cached data for account %s", account_id)
                         else:
                             # No cached data, initialize empty
                             accounts_data[account_id] = {
                                 "id": account_id,
                                 "requisition_id": requisition_id,
-                                "institution_id": requisition.get("institution_id"),
+                                "institution_id": institution_id,
                                 "details": None,
                                 "balances": None,
                                 "transactions": None,

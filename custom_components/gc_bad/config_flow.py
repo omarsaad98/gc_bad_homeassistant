@@ -12,7 +12,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .api_client import GoCardlessAPIClient
-from .const import CONF_SECRET_ID, CONF_SECRET_KEY, DOMAIN
+from .const import CONF_SECRET_ID, CONF_SECRET_KEY, DOMAIN, IGNORED_INSTITUTION_PREFIXES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -133,6 +133,12 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
                 self._institutions = await self._api_client.get_institutions(
                     self._country
                 )
+                if self._institutions:
+                    self._institutions = [
+                        inst
+                        for inst in self._institutions
+                        if not inst.get("id", "").startswith(IGNORED_INSTITUTION_PREFIXES)
+                    ]
                 if self._institutions:
                     return await self.async_step_select_institution()
                 else:
