@@ -34,13 +34,22 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
-    # Create sensors for each account
+    # Create sensors for each balance in each account
     if coordinator.data and "accounts" in coordinator.data:
         for account_id, account_data in coordinator.data["accounts"].items():
-            # Add balance sensor
-            entities.append(
-                GoCardlessAccountBalanceSensor(coordinator, account_id, account_data)
-            )
+            balances = account_data.get("balances", {}).get("balances", [])
+            for balance in balances:
+                currency = balance.get("balanceAmount", {}).get("currency")
+                balance_type = balance.get("balanceType")
+                entities.append(
+                    GoCardlessAccountBalanceSensor(
+                        coordinator,
+                        account_id,
+                        account_data,
+                        balance_type=balance_type,
+                        currency=currency,
+                    )
+                )
 
     async_add_entities(entities)
 
@@ -53,10 +62,15 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
         coordinator: GoCardlessDataUpdateCoordinator,
         account_id: str,
         account_data: dict[str, Any],
+        *,
+        balance_type: str | None,
+        currency: str | None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._account_id = account_id
+        self._balance_type = balance_type
+        self._balance_currency = currency or "UNKNOWN"
         
         # Get resourceId from details if available
         resource_id = None
@@ -64,8 +78,8 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
             account_info = account_data["details"].get("account", {})
             resource_id = account_info.get("resourceId")
         
-        # Use resourceId for unique_id if available, otherwise use account_id
-        self._attr_unique_id = f"{resource_id or account_id}_balance"
+        # Use account id + currency for unique_id (per-balance sensor)
+        self._attr_unique_id = f"{account_id}_{self._balance_currency}"
         
         # Don't set _attr_name here - use dynamic name property instead
         self._attr_device_class = SensorDeviceClass.MONETARY
@@ -102,13 +116,13 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
         
         # Build name with institution and account name
         if institution_name and account_name:
-            return f"{institution_name} {account_name} Balance"
+            return f"{institution_name} {account_name}"
         elif account_name:
-            return f"{account_name} Balance"
+            return f"{account_name}"
         elif institution_name:
-            return f"{institution_name} Account {self._account_id[-4:]} Balance"
+            return f"{institution_name} Account {self._account_id[-4:]}"
         else:
-            return f"Account {self._account_id[-4:]} Balance"
+            return f"Account {self._account_id[-4:]}"
 
     @property
     def native_value(self) -> float | None:
@@ -124,10 +138,16 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
         if not balances or "balances" not in balances:
             return self._attr_native_value
         
-        # Get the first available balance
+        # Get the balance that matches this sensor's currency (and type if present)
         balance_list = balances["balances"]
-        if balance_list and len(balance_list) > 0:
-            balance_info = balance_list[0]
+        for balance_info in balance_list:
+            if (
+                balance_info.get("balanceAmount", {}).get("currency")
+                != self._balance_currency
+            ):
+                continue
+            if self._balance_type and balance_info.get("balanceType") != self._balance_type:
+                continue
             amount = balance_info.get("balanceAmount", {}).get("amount")
             if amount:
                 try:
@@ -151,11 +171,15 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
         if not balances or "balances" not in balances:
             return self._attr_native_unit_of_measurement
         
-        # Get currency from the first available balance
+        # Get currency from the matching balance
         balance_list = balances["balances"]
-        if balance_list and len(balance_list) > 0:
-            balance_info = balance_list[0]
-            return balance_info.get("balanceAmount", {}).get("currency")
+        for balance_info in balance_list:
+            currency = balance_info.get("balanceAmount", {}).get("currency")
+            if currency != self._balance_currency:
+                continue
+            if self._balance_type and balance_info.get("balanceType") != self._balance_type:
+                continue
+            return currency
         
         return self._attr_native_unit_of_measurement
 
@@ -173,15 +197,23 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
             "account_id": self._account_id,
             "requisition_id": account_data.get("requisition_id"),
             "institution_id": account_data.get("institution_id"),
+            "currency": self._balance_currency,
         }
         
         balances = account_data.get("balances")
         if balances and "balances" in balances:
             balance_list = balances["balances"]
-            if balance_list and len(balance_list) > 0:
-                balance_info = balance_list[0]
+            for balance_info in balance_list:
+                if (
+                    balance_info.get("balanceAmount", {}).get("currency")
+                    != self._balance_currency
+                ):
+                    continue
+                if self._balance_type and balance_info.get("balanceType") != self._balance_type:
+                    continue
                 attributes["balance_type"] = balance_info.get("balanceType")
                 attributes["reference_date"] = balance_info.get("referenceDate")
+                break
         
         return attributes
 

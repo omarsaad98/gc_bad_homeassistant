@@ -48,6 +48,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Load cached data without calling the API
     await coordinator.async_load_cached_data()
+    # Ensure balances are refreshed so new balance types appear on reload
+    await coordinator.async_force_refresh_balances()
 
     # Store coordinator in hass.data
     hass.data.setdefault(DOMAIN, {})

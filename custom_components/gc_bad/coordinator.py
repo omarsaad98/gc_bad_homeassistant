@@ -46,6 +46,7 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
         # Cache institution names to avoid repeated API calls
         self._institution_names: dict[str, str] = {}
         self.last_successful_refresh: datetime | None = None
+        self._force_balance_refresh = False
         
         super().__init__(
             hass,
@@ -153,6 +154,13 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
             
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
+        finally:
+            self._force_balance_refresh = False
+
+    async def async_force_refresh_balances(self) -> None:
+        """Force a refresh of balances on next coordinator update."""
+        self._force_balance_refresh = True
+        await self.async_refresh()
 
     async def _populate_missing_data(self, accounts_data: dict[str, Any]) -> None:
         """Populate missing balance/details data for accounts."""
@@ -165,8 +173,8 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
                 except Exception as err:
                     _LOGGER.error("Failed to fetch initial details for %s: %s", account_id, err)
             
-            # Check if balances are missing
-            if not account_info.get("balances"):
+            # Check if balances are missing or a forced refresh is requested
+            if self._force_balance_refresh or not account_info.get("balances"):
                 _LOGGER.info("Fetching missing balances for account %s", account_id)
                 try:
                     await self.async_update_account_balances(account_id)
