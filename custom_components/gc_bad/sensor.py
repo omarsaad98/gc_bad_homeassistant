@@ -1,12 +1,12 @@
 """Sensor platform for GoCardless Bank Account Data integration."""
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -41,16 +41,11 @@ async def async_setup_entry(
             entities.append(
                 GoCardlessAccountBalanceSensor(coordinator, account_id, account_data)
             )
-            
-            # Add account details sensor
-            entities.append(
-                GoCardlessAccountDetailsSensor(coordinator, account_id, account_data)
-            )
 
     async_add_entities(entities)
 
 
-class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
+class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
     """Sensor for account balance."""
 
     def __init__(
@@ -76,6 +71,7 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
         self._last_balance_update: datetime | None = None
+        self._restored_attributes: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -118,15 +114,15 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if not self.coordinator.data:
-            return None
+            return self._attr_native_value
         
         account_data = self.coordinator.data["accounts"].get(self._account_id)
         if not account_data:
-            return None
+            return self._attr_native_value
         
         balances = account_data.get("balances")
         if not balances or "balances" not in balances:
-            return None
+            return self._attr_native_value
         
         # Get the first available balance
         balance_list = balances["balances"]
@@ -137,23 +133,23 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
                 try:
                     return float(amount)
                 except (ValueError, TypeError):
-                    return None
+                    return self._attr_native_value
         
-        return None
+        return self._attr_native_value
 
     @property
     def native_unit_of_measurement(self) -> str | None:
         """Return the unit of measurement."""
         if not self.coordinator.data:
-            return None
+            return self._attr_native_unit_of_measurement
         
         account_data = self.coordinator.data["accounts"].get(self._account_id)
         if not account_data:
-            return None
+            return self._attr_native_unit_of_measurement
         
         balances = account_data.get("balances")
         if not balances or "balances" not in balances:
-            return None
+            return self._attr_native_unit_of_measurement
         
         # Get currency from the first available balance
         balance_list = balances["balances"]
@@ -161,17 +157,17 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
             balance_info = balance_list[0]
             return balance_info.get("balanceAmount", {}).get("currency")
         
-        return None
+        return self._attr_native_unit_of_measurement
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional state attributes."""
         if not self.coordinator.data:
-            return None
+            return self._restored_attributes
         
         account_data = self.coordinator.data["accounts"].get(self._account_id)
         if not account_data:
-            return None
+            return self._restored_attributes
         
         attributes = {
             "account_id": self._account_id,
@@ -192,6 +188,14 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass, ensure we have balance data."""
         await super().async_added_to_hass()
+        if restored := await self.async_get_last_sensor_data():
+            self._attr_native_value = restored.native_value
+            self._attr_native_unit_of_measurement = (
+                restored.native_unit_of_measurement
+            )
+            if restored.extra_attributes:
+                self._restored_attributes = dict(restored.extra_attributes)
+
         # The coordinator now populates missing data automatically
         # Just mark when we're ready
         if self.coordinator.data:
@@ -217,149 +221,6 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, SensorEntity):
         # Request balance update
         await self.coordinator.async_update_account_balances(self._account_id)
         self._last_balance_update = now
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        self.async_write_ha_state()
-
-
-class GoCardlessAccountDetailsSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for account details (IBAN, name, etc.)."""
-
-    def __init__(
-        self,
-        coordinator: GoCardlessDataUpdateCoordinator,
-        account_id: str,
-        account_data: dict[str, Any],
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_id = account_id
-        
-        # Use resourceId for unique_id if available from account_data
-        resource_id = None
-        if account_data.get("details"):
-            account_info = account_data["details"].get("account", {})
-            resource_id = account_info.get("resourceId")
-        
-        # Use resourceId for unique_id if available, otherwise use account_id
-        self._attr_unique_id = f"{resource_id or account_id}_details"
-        
-        # Name will be set dynamically in the name property
-        self._last_details_update: datetime | None = None
-
-    @property
-    def name(self) -> str:
-        """Return the name of the sensor (dynamic based on current data)."""
-        if not self.coordinator.data:
-            return f"Account {self._account_id[-4:]} Details"
-        
-        account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
-        if not account_data:
-            return f"Account {self._account_id[-4:]} Details"
-        
-        # Get account name from details
-        account_name = None
-        if account_data.get("details"):
-            account_info = account_data["details"].get("account", {})
-            account_name = account_info.get("name")
-        
-        # Get institution name from coordinator cache
-        institution_id = account_data.get("institution_id", "")
-        institution_name = None
-        if institution_id:
-            institution_names = self.coordinator.data.get("institution_names", {})
-            institution_name = institution_names.get(institution_id)
-            
-            # Fallback: Extract from institution_id
-            if not institution_name:
-                institution_name = institution_id.split("_")[0].title()
-        
-        # Build name with institution and account name
-        if institution_name and account_name:
-            return f"{institution_name} {account_name} Details"
-        elif account_name:
-            return f"{account_name} Details"
-        elif institution_name:
-            return f"{institution_name} Account {self._account_id[-4:]} Details"
-        else:
-            return f"Account {self._account_id[-4:]} Details"
-
-    async def async_added_to_hass(self) -> None:
-        """When entity is added to hass, ensure we have details data."""
-        await super().async_added_to_hass()
-        # The coordinator now populates missing data automatically
-        # Just mark when we're ready
-        if self.coordinator.data:
-            account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
-            if account_data and account_data.get("details"):
-                self._last_details_update = datetime.now()
-                _LOGGER.debug("Details sensor ready for %s", self._account_id)
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the state of the sensor (IBAN or account name)."""
-        if not self.coordinator.data:
-            return None
-        
-        account_data = self.coordinator.data["accounts"].get(self._account_id)
-        if not account_data:
-            return None
-        
-        details = account_data.get("details")
-        if not details or "account" not in details:
-            return "Not loaded"
-        
-        account_info = details["account"]
-        # Return IBAN if available, otherwise account name
-        return account_info.get("iban") or account_info.get("name") or "Unknown"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return additional state attributes."""
-        if not self.coordinator.data:
-            return None
-        
-        account_data = self.coordinator.data["accounts"].get(self._account_id)
-        if not account_data:
-            return None
-        
-        attributes = {
-            "account_id": self._account_id,
-            "requisition_id": account_data.get("requisition_id"),
-            "institution_id": account_data.get("institution_id"),
-        }
-        
-        details = account_data.get("details")
-        if details and "account" in details:
-            account_info = details["account"]
-            attributes["iban"] = account_info.get("iban")
-            attributes["name"] = account_info.get("name")
-            attributes["currency"] = account_info.get("currency")
-            attributes["owner_name"] = account_info.get("ownerName")
-            attributes["status"] = account_info.get("status")
-        
-        return attributes
-
-    async def async_update(self) -> None:
-        """Update the sensor - respecting rate limits."""
-        # Only update if enough time has passed
-        now = datetime.now()
-        if self._last_details_update:
-            time_since_update = now - self._last_details_update
-            # Use same interval as balances
-            if time_since_update < UPDATE_INTERVAL_BALANCES:
-                _LOGGER.debug(
-                    "Skipping details update for %s - too soon (last: %s ago)",
-                    self._account_id,
-                    time_since_update,
-                )
-                return
-        
-        # Request details update
-        await self.coordinator.async_update_account_details(self._account_id)
-        self._last_details_update = now
 
     @callback
     def _handle_coordinator_update(self) -> None:

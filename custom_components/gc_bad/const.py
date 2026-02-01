@@ -21,6 +21,10 @@ UPDATE_INTERVAL_DETAILS = timedelta(hours=24)   # Once per day (safe with 1/day 
 UPDATE_INTERVAL_TRANSACTIONS = timedelta(hours=8)  # 3 times per day
 UPDATE_INTERVAL_REQUISITIONS = timedelta(minutes=30)  # More frequent for list updates
 
+# Scheduled refresh behavior (local time)
+SCHEDULED_REFRESH_HOURS = (6, 18)
+REFRESH_SKIP_WINDOW = timedelta(hours=10)
+
 # Scopes
 SCOPE_BALANCES = "balances"
 SCOPE_DETAILS = "details"

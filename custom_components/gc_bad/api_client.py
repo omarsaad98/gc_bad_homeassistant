@@ -474,4 +474,3 @@ class GoCardlessAPIClient:
         self._rate_limits = {}
         self._storage_loaded = False
         _LOGGER.info("Cleared all stored tokens and rate limits")
-

@@ -5,11 +5,19 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
 
 from .api_client import GoCardlessAPIClient
-from .const import CONF_SECRET_ID, CONF_SECRET_KEY, DOMAIN
+from .const import (
+    CONF_SECRET_ID,
+    CONF_SECRET_KEY,
+    DOMAIN,
+    REFRESH_SKIP_WINDOW,
+    SCHEDULED_REFRESH_HOURS,
+)
 from .coordinator import GoCardlessDataUpdateCoordinator
 from .views import GoCardlessAuthCallbackView
 
@@ -37,25 +45,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Create data update coordinator
     coordinator = GoCardlessDataUpdateCoordinator(hass, api_client, entry.entry_id)
-    
-    # Fetch initial data
-    await coordinator.async_config_entry_first_refresh()
-    
-    # Ensure all accounts have details before creating sensors
-    # This is needed for proper sensor naming and unique_ids
-    if coordinator.data and "accounts" in coordinator.data:
-        for account_id in coordinator.data["accounts"]:
-            account_data = coordinator.data["accounts"][account_id]
-            if not account_data.get("details"):
-                _LOGGER.info("Fetching details for account %s before sensor creation", account_id)
-                await coordinator.async_update_account_details(account_id)
-    
+
+    # Load cached data without calling the API
+    await coordinator.async_load_cached_data()
+
     # Store coordinator in hass.data
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "api_client": api_client,
+        "unsub_schedules": [],
     }
+
+    @callback
+    def _schedule_refresh(call_time) -> None:
+        """Request a coordinator refresh on the configured schedule."""
+        last_refresh = coordinator.last_successful_refresh
+        if last_refresh and dt_util.utcnow() - last_refresh < REFRESH_SKIP_WINDOW:
+            _LOGGER.debug(
+                "Skipping scheduled refresh; last success %s ago",
+                dt_util.utcnow() - last_refresh,
+            )
+            return
+
+        hass.async_create_task(coordinator.async_request_refresh())
+
+    for hour in SCHEDULED_REFRESH_HOURS:
+        unsub = async_track_time_change(
+            hass,
+            _schedule_refresh,
+            hour=hour,
+            minute=0,
+            second=0,
+        )
+        hass.data[DOMAIN][entry.entry_id]["unsub_schedules"].append(unsub)
     
     # Forward the setup to the sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -69,6 +92,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     
     if unload_ok:
+        for unsub in hass.data[DOMAIN][entry.entry_id].get("unsub_schedules", []):
+            unsub()
         hass.data[DOMAIN].pop(entry.entry_id)
     
     return unload_ok

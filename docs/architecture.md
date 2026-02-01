@@ -15,13 +15,13 @@ GoCardless imposes aggressive rate limits (typically 2-4 requests per day for re
 ### 2. Data Persistence
 To minimize API usage and ensure a fast startup:
 - **Token Storage**: Access and refresh tokens are stored in Home Assistant's secure storage (`.storage/`).
-- **Data Caching**: All account balances, details, and institution names are persisted.
-- **Restart Optimization**: On startup, the integration loads cached data immediately. No API calls for balances or details are made during startup unless the cache is missing.
+- **Data Caching**: Account balances and details are persisted for reuse on restart.
+- **Restart Optimization**: On startup, cached data is loaded immediately and sensor state is restored. No API calls are made during startup.
 
 ### 3. Startup Behavior
-1. **Requisitions List**: One API call is made to get the current list of connections (high rate limit, safe).
-2. **Cache Load**: Cached data is restored for all accounts.
-3. **Lazy Fetching**: If data is missing for any account, a fetch is scheduled with a random delay (5-40s) to prevent a burst of requests.
+1. **Cache Load**: Cached data is restored for all accounts and sensor state is restored via `RestoreSensor`.
+2. **No Boot Fetches**: The coordinator does not refresh at startup.
+3. **Scheduled Refreshes**: Two daily refreshes (06:00 and 18:00 local time) trigger API fetches, with a 10-hour guard to skip if a recent successful refresh already occurred.
 
 ### 4. Country & Institution Selection
 - **pycountry**: Uses the `pycountry` library to provide a comprehensive and standardized list of 240+ countries.

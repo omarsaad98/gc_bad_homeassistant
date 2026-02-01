@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -17,7 +18,6 @@ from .const import (
     RATE_LIMIT_TRANSACTIONS,
     STORAGE_KEY,
     STORAGE_VERSION,
-    UPDATE_INTERVAL_REQUISITIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,13 +45,29 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
         
         # Cache institution names to avoid repeated API calls
         self._institution_names: dict[str, str] = {}
+        self.last_successful_refresh: datetime | None = None
         
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=UPDATE_INTERVAL_REQUISITIONS,
+            update_interval=None,
         )
+
+    async def async_load_cached_data(self) -> None:
+        """Load cached account data without calling the API."""
+        cached_data = await self._store.async_load()
+        if not cached_data:
+            return
+
+        self.data = {
+            "requisitions": [],
+            "accounts": cached_data.get("accounts", {}),
+            "institution_names": self._institution_names,
+        }
+        saved_at = cached_data.get("saved_at")
+        if saved_at:
+            self.last_successful_refresh = dt_util.parse_datetime(saved_at)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -129,6 +145,9 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
             # Check for accounts with missing data and fetch it
             await self._populate_missing_data(accounts_data)
             
+            # Mark successful refresh time before returning
+            self.last_successful_refresh = dt_util.utcnow()
+
             # Return updated data
             return self.data
             
@@ -223,7 +242,7 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
         
         save_data = {
             "accounts": self.data.get("accounts", {}),
-            "saved_at": datetime.now().isoformat(),
+            "saved_at": dt_util.utcnow().isoformat(),
         }
         
         await self._store.async_save(save_data)
