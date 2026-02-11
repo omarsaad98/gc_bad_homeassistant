@@ -1,58 +1,41 @@
 # Testing Guide
 
-## Overview
-This project includes a robust testing suite designed to validate the integration against the real GoCardless API without risking your daily rate limits.
+## Test Categories
 
-## Setup for Testing
-1. Create a `.env` file in the project root (use `.env.example` as a template).
-2. Add your `GCD_SECRET_ID` and `GCD_SECRET_KEY`.
-3. Ensure you have `uv` installed.
+- Unit tests (default): no live API required.
+- Live smoke tests: optional, marked with `live`.
 
-## Safe Testing with Sandbox
-**Always use the Sandbox institution for development testing.**
-- **Institution ID**: `SANDBOXFINANCE_SFIN0000`
-- **Benefits**: No rate limits, realistic fake data, instant authorization.
+## Setup
 
-### Interactive Sandbox Test
-Run the following command to guide you through creating a sandbox connection and fetching data:
+1. Create `.env` in the project root (or export environment variables directly).
+2. Set:
+   - `GCD_SECRET_ID`
+   - `GCD_SECRET_KEY`
+3. Use sandbox institutions for development whenever possible.
+
+## Commands
+
+Run fast unit tests:
+
 ```bash
-uv run python tests/connect_sandbox.py
+uv run pytest tests -m "not live" -v
 ```
 
-## Automated Tests
-Run the automated test suite using `uv`:
+Run live smoke tests:
 
-### Basic Checks (No API required)
 ```bash
-uv run pytest tests/test_basic.py -v
+uv run pytest tests -m live -v
 ```
 
-### Live API Client Tests
+Run only config flow tests:
+
 ```bash
-uv run pytest tests/test_api_client_live.py -v
+uv run pytest tests/test_config_flow.py -v
 ```
 
-### Integration Setup Tests
-```bash
-uv run pytest tests/test_integration_live.py -v
-```
+## Notes
 
-## Manual Debugging
-Use the manual test script for a comprehensive check of all features:
-```bash
-uv run python tests/manual_test_script.py
-```
-
-## API Response Logs
-When running tests, raw API responses are saved to:
-`tests/test_data/api_responses/`
-
-These are invaluable for reviewing the exact data structure returned by your bank.
-
-## Resetting Rate Limits (Testing Only)
-If you hit your local rate limit counters during testing, you can reset them with:
-```bash
-uv run python tests/reset_rate_limits.py
-```
+- Live tests consume API quota; keep them as smoke checks.
+- Unit tests should cover coordinator orchestration, sensor projection, and flow behavior.
 
 

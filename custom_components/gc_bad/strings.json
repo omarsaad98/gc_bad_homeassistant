@@ -11,7 +11,7 @@
       }
     },
     "error": {
-      "invalid_auth": "Invalid API secret. Please check your credentials.",
+      "invalid_auth": "Invalid credentials. Please check your secret ID and secret key.",
       "cannot_connect": "Unable to connect to GoCardless API.",
       "unknown": "An unexpected error occurred."
     },
@@ -41,6 +41,17 @@
           "institution_id": "Bank"
         }
       }
+    },
+    "error": {
+      "no_institutions": "No banks found for this country.",
+      "cannot_connect": "Unable to connect to GoCardless API.",
+      "invalid_institution": "Invalid bank selection."
+    },
+    "abort": {
+      "missing_configuration": "Missing configuration data.",
+      "requisition_failed": "Failed to create bank connection.",
+      "authorization_pending": "Authorization is still pending. Complete the bank flow and try again.",
+      "authorization_failed": "Bank authorization failed."
     }
   }
 }

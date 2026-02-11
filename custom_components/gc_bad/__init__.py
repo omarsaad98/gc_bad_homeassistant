@@ -1,7 +1,9 @@
 """The GoCardless Bank Account Data integration."""
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import logging
+from typing import Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -10,92 +12,64 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 
-from .api_client import GoCardlessAPIClient
+from .api.client import GoCardlessApiClient
 from .const import (
     CONF_SECRET_ID,
     CONF_SECRET_KEY,
     DOMAIN,
     REFRESH_SKIP_WINDOW,
     SCHEDULED_REFRESH_HOURS,
-    UPDATE_INTERVAL_BALANCES,
 )
 from .coordinator import GoCardlessDataUpdateCoordinator
+from .storage import IntegrationStorage
 from .views import GoCardlessAuthCallbackView
 
 _LOGGER = logging.getLogger(__name__)
-
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
+@dataclass(slots=True)
+class GCBadRuntimeData:
+    """Runtime objects for one config entry."""
+
+    coordinator: GoCardlessDataUpdateCoordinator
+    api_client: GoCardlessApiClient
+    storage: IntegrationStorage
+    unsub_schedules: list[Callable[[], None]] = field(default_factory=list)
+
+
+type GCBadConfigEntry = ConfigEntry[GCBadRuntimeData]
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the GoCardless Bank Account Data component."""
-    # Register the OAuth callback view
+    """Set up the integration domain."""
     hass.http.register_view(GoCardlessAuthCallbackView(hass))
-    _LOGGER.info("Registered GoCardless OAuth callback view")
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up GoCardless Bank Account Data from a config entry."""
-    # Get credentials from config entry
+async def async_setup_entry(hass: HomeAssistant, entry: GCBadConfigEntry) -> bool:
+    """Set up GoCardless from a config entry."""
     secret_id = entry.data[CONF_SECRET_ID]
     secret_key = entry.data[CONF_SECRET_KEY]
-    
-    # Create API client
-    api_client = GoCardlessAPIClient(hass, secret_id, secret_key)
-    
-    # Create data update coordinator
-    coordinator = GoCardlessDataUpdateCoordinator(hass, api_client, entry.entry_id)
+    storage = IntegrationStorage(hass, entry.entry_id)
+    api_client = GoCardlessApiClient(hass, storage, secret_id, secret_key)
+    coordinator = GoCardlessDataUpdateCoordinator(hass, api_client, storage)
+    runtime_data = GCBadRuntimeData(
+        coordinator=coordinator,
+        api_client=api_client,
+        storage=storage,
+    )
 
-    # Load cached data without calling the API
-    await coordinator.async_load_cached_data()
-
-    should_force_balance_refresh = True
-    if coordinator.data and coordinator.data.get("accounts"):
-        now = dt_util.utcnow()
-        has_recent_balance = False
-        for account_data in coordinator.data["accounts"].values():
-            balances = account_data.get("balances")
-            if not balances:
-                continue
-            updated_at = account_data.get("balances_updated")
-            if not updated_at:
-                continue
-            parsed = dt_util.parse_datetime(updated_at)
-            if parsed and now - parsed < UPDATE_INTERVAL_BALANCES:
-                has_recent_balance = True
-                break
-
-        if has_recent_balance:
-            should_force_balance_refresh = False
-
-    if should_force_balance_refresh:
-        # Ensure balances are refreshed so new balance types appear on reload
-        await coordinator.async_force_refresh_balances()
-    else:
-        _LOGGER.debug(
-            "Skipping forced balance refresh; cached balances are recent"
-        )
-
-    # Store coordinator in hass.data
+    entry.runtime_data = runtime_data
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "coordinator": coordinator,
-        "api_client": api_client,
-        "unsub_schedules": [],
-    }
+    hass.data[DOMAIN][entry.entry_id] = runtime_data
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     @callback
-    def _schedule_refresh(call_time) -> None:
-        """Request a coordinator refresh on the configured schedule."""
+    def _schedule_refresh(_call_time) -> None:
         last_refresh = coordinator.last_successful_refresh
         if last_refresh and dt_util.utcnow() - last_refresh < REFRESH_SKIP_WINDOW:
-            _LOGGER.debug(
-                "Skipping scheduled refresh; last success %s ago",
-                dt_util.utcnow() - last_refresh,
-            )
             return
-
         hass.async_create_task(coordinator.async_request_refresh())
 
     for hour in SCHEDULED_REFRESH_HOURS:
@@ -106,28 +80,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             minute=0,
             second=0,
         )
-        hass.data[DOMAIN][entry.entry_id]["unsub_schedules"].append(unsub)
-    
-    # Forward the setup to the sensor platform
+        runtime_data.unsub_schedules.append(unsub)
+
+    await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: GCBadConfigEntry) -> bool:
     """Unload a config entry."""
-    # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
-    if unload_ok:
-        for unsub in hass.data[DOMAIN][entry.entry_id].get("unsub_schedules", []):
-            unsub()
-        hass.data[DOMAIN].pop(entry.entry_id)
-    
-    return unload_ok
+    if not unload_ok:
+        return False
+
+    runtime_data = entry.runtime_data
+    for unsub in runtime_data.unsub_schedules:
+        unsub()
+
+    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    return True
 
 
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
+async def async_reload_entry(
+    hass: HomeAssistant,
+    entry: GCBadConfigEntry,
+) -> None:
+    """Reload config entry when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)

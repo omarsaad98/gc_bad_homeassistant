@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
-
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,9 +57,12 @@ class GoCardlessAuthCallbackView(HomeAssistantView):
                 flow_id=flow_id,
                 user_input={},
             )
-            
-            _LOGGER.info("Flow resume completed. Result type: %s", result.get("type") if isinstance(result, dict) else type(result))
-            
+
+            result_type = result.get("type") if isinstance(result, dict) else None
+            _LOGGER.info("Flow resume completed. Result type: %s", result_type)
+            if result_type == "abort":
+                reason = result.get("reason", "unknown")
+                return self._error_response(f"Authorization was not completed: {reason}")
         except Exception as err:
             _LOGGER.exception("Failed to complete config flow: %s", err)
             return self._error_response(f"Failed to complete authorization: {str(err)}")
@@ -109,7 +110,7 @@ class GoCardlessAuthCallbackView(HomeAssistantView):
         </head>
         <body>
             <div class="container">
-                <div class="success">✓</div>
+                <div class="success">OK</div>
                 <h1>Authorization Complete!</h1>
                 <p>Your bank account has been successfully connected to Home Assistant.</p>
                 <p>You can close this window and return to Home Assistant.</p>
@@ -178,7 +179,7 @@ class GoCardlessAuthCallbackView(HomeAssistantView):
         </head>
         <body>
             <div class="container">
-                <div class="error">✗</div>
+                <div class="error">ERR</div>
                 <h1>Authorization Error</h1>
                 <p>There was a problem completing the bank authorization.</p>
                 <p>Please return to Home Assistant and try again.</p>

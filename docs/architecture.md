@@ -1,49 +1,71 @@
-# Architecture & Implementation Details
+# Architecture
 
-## Overview
-This integration connects Home Assistant to the GoCardless Bank Account Data API (formerly Nordigen). It is built with a focus on reliability, performance, and strict adherence to API rate limits.
+## Mental Model
 
-## Key Technical Decisions
+The integration follows a simple flow:
 
-### 1. Rate Limit Strategy
-GoCardless imposes aggressive rate limits (typically 2-4 requests per day for real accounts). 
-- **Conservative Polling**: Balances and details are updated once every 24 hours.
-- **Safety Buffer**: We apply a 25% safety buffer to all documented limits.
-- **Header Monitoring**: The integration parses `http_x_ratelimit_account_success_limit` and related headers from every response to dynamically adjust and log current usage.
-- **Pre-emptive Blocking**: Requests are blocked before being sent if the local counter indicates the limit has been reached.
+1. Config flow stores credentials.
+2. Integration setup builds runtime objects.
+3. Coordinator fetches and normalizes API data into one snapshot.
+4. Sensor entities project that snapshot into Home Assistant states.
 
-### 2. Data Persistence
-To minimize API usage and ensure a fast startup:
-- **Token Storage**: Access and refresh tokens are stored in Home Assistant's secure storage (`.storage/`).
-- **Data Caching**: Account balances and details are persisted for reuse on restart.
-- **Restart Optimization**: On startup, cached data is loaded immediately and sensor state is restored. No API calls are made during startup.
+## Module Boundaries
 
-### 3. Startup Behavior
-1. **Cache Load**: Cached data is restored for all accounts and sensor state is restored via `RestoreSensor`.
-2. **No Boot Fetches**: The coordinator does not refresh at startup.
-3. **Scheduled Refreshes**: Two daily refreshes (06:00 and 18:00 local time) trigger API fetches, with a 10-hour guard to skip if a recent successful refresh already occurred.
+### `custom_components/gc_bad/__init__.py`
 
-### 4. Country & Institution Selection
-- **pycountry**: Uses the `pycountry` library to provide a comprehensive and standardized list of 240+ countries.
-- **Institution API**: Bank lists are fetched directly from GoCardless based on the selected country.
-- **Dynamic Naming**: Sensor names are built dynamically using the official institution name and the account name provided by the bank.
+- Entry lifecycle only (setup, unload, reload)
+- Runtime object wiring
+- Scheduled refresh registration
 
-## Data Structures
-The internal state is managed by a `DataUpdateCoordinator` which organizes data by account ID:
-```json
-{
-  "accounts": {
-    "account_id": {
-      "details": { ... },
-      "balances": { ... },
-      "transactions": { ... },
-      "institution_id": "..."
-    }
-  },
-  "institution_names": {
-    "id": "Friendly Name"
-  }
-}
-```
+### `custom_components/gc_bad/config_flow.py` and `custom_components/gc_bad/views.py`
+
+- User setup and bank authorization flow
+- No entity/coordinator business logic
+
+### `custom_components/gc_bad/api/`
+
+- `auth.py`: token lifecycle
+- `rate_limits.py`: daily limit accounting and persistence
+- `client.py`: endpoint methods and request transport
+
+### `custom_components/gc_bad/coordinator.py`
+
+- Owns the integration snapshot
+- Handles all API-to-model orchestration
+- Persists snapshot using storage boundary
+
+### `custom_components/gc_bad/entity.py` and `custom_components/gc_bad/sensor.py`
+
+- Base entity account lookup helpers
+- Balance sensors only
+- No API calls from entities
+
+### `custom_components/gc_bad/storage.py`
+
+- Encapsulates persistence schema for:
+  - API state (tokens and rate limits)
+  - coordinator snapshot cache
+
+## Snapshot Data Model
+
+`IntegrationSnapshot`:
+- `accounts: dict[str, AccountSnapshot]`
+- `institution_names: dict[str, str]`
+- `last_successful_refresh: str | None`
+
+`AccountSnapshot`:
+- account identity and linkage (`id`, `requisition_id`, `institution_id`)
+- details payload plus derived fields (`account_name`, `iban`)
+- list of typed `BalanceSnapshot` entries
+
+`BalanceSnapshot`:
+- `amount`, `currency`, `balance_type`, `reference_date`
+
+## Complexity Rules
+
+- Keep modules single-purpose.
+- Keep entities read-only over coordinator snapshot.
+- Keep API state and snapshot persistence isolated in `storage.py`.
+- Prefer explicit typed models over nested ad-hoc dict access.
 
 

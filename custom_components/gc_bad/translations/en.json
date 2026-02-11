@@ -11,7 +11,7 @@
       }
     },
     "error": {
-      "invalid_auth": "Invalid API secret. Please check your credentials.",
+      "invalid_auth": "Invalid credentials. Please check your secret ID and secret key.",
       "cannot_connect": "Unable to connect to GoCardless API.",
       "unknown": "An unexpected error occurred."
     },

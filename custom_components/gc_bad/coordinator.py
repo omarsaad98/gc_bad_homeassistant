@@ -3,266 +3,148 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import Any
 
+from homeassistant.config_entries import ConfigEntryAuthFailed
 from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
-from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
-from .api_client import GoCardlessAPIClient
-from .const import (
-    DOMAIN,
-    RATE_LIMIT_BALANCES,
-    RATE_LIMIT_DETAILS,
-    RATE_LIMIT_TRANSACTIONS,
-    STORAGE_KEY,
-    STORAGE_VERSION,
+from .api.client import (
+    GCBadApiError,
+    GCBadCannotConnectError,
+    GCBadRateLimitError,
+    GoCardlessApiClient,
 )
+from .const import DOMAIN, RATE_LIMIT_BALANCES, RATE_LIMIT_DETAILS, UPDATE_INTERVAL_BALANCES
+from .models import AccountSnapshot, IntegrationSnapshot
+from .storage import IntegrationStorage
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching GoCardless data from the API."""
+class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator[IntegrationSnapshot]):
+    """Coordinator that owns the integration snapshot lifecycle."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        api_client: GoCardlessAPIClient,
-        entry_id: str,
+        api_client: GoCardlessApiClient,
+        storage: IntegrationStorage,
     ) -> None:
-        """Initialize the data update coordinator."""
-        self.api_client = api_client
-        self._entry_id = entry_id
-        
-        # Storage for account data persistence
-        self._store = Store(
-            hass,
-            STORAGE_VERSION,
-            f"{STORAGE_KEY}_data_{entry_id}",
-        )
-        
-        # Cache institution names to avoid repeated API calls
-        self._institution_names: dict[str, str] = {}
-        self.last_successful_refresh: datetime | None = None
-        self._force_balance_refresh = False
-        
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=None,
-        )
+        """Initialize coordinator."""
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
+        self._api_client = api_client
+        self._storage = storage
 
-    async def async_load_cached_data(self) -> None:
-        """Load cached account data without calling the API."""
-        cached_data = await self._store.async_load()
-        if not cached_data:
-            return
+    async def _async_setup(self) -> None:
+        """Load cached snapshot once before first refresh."""
+        cached = await self._storage.load_snapshot()
+        if cached:
+            self.data = cached
 
-        self.data = {
-            "requisitions": [],
-            "accounts": cached_data.get("accounts", {}),
-            "institution_names": self._institution_names,
-        }
-        saved_at = cached_data.get("saved_at")
-        if saved_at:
-            self.last_successful_refresh = dt_util.parse_datetime(saved_at)
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch data from API."""
-        cached_data = None
-        try:
-            # Try to load cached account data first (to preserve on restart)
-            cached_data = await self._store.async_load()
-            cached_accounts = {}
-            if cached_data:
-                cached_accounts = cached_data.get("accounts", {})
-                _LOGGER.info("Loaded cached data for %d accounts from storage", len(cached_accounts))
-            
-            # Fetch all requisitions (this is safe - 300/min limit)
-            requisitions = await self.api_client.get_requisitions()
-            
-            # Structure to hold all account data
-            accounts_data: dict[str, Any] = {}
-            
-            for requisition in requisitions:
-                requisition_id = requisition.get("id")
-                status = requisition.get("status")
-                
-                # Only process linked requisitions
-                if status != "LN":  # LN = Linked
-                    continue
-                
-                # Get accounts from this requisition
-                account_ids = requisition.get("accounts", [])
-                
-                for account_id in account_ids:
-                    if account_id not in accounts_data:
-                        # Start with cached data if available
-                        if account_id in cached_accounts:
-                            accounts_data[account_id] = cached_accounts[account_id]
-                            # Update requisition info in case it changed
-                            accounts_data[account_id]["requisition_id"] = requisition_id
-                            accounts_data[account_id]["institution_id"] = requisition.get("institution_id")
-                            _LOGGER.debug("Restored cached data for account %s", account_id)
-                        else:
-                            # No cached data, initialize empty
-                            accounts_data[account_id] = {
-                                "id": account_id,
-                                "requisition_id": requisition_id,
-                                "institution_id": requisition.get("institution_id"),
-                                "details": None,
-                                "balances": None,
-                                "transactions": None,
-                            }
-            
-            # Fetch institution names for linked accounts (cache for sensor naming)
-            unique_institutions = set(
-                acc.get("institution_id") for acc in accounts_data.values() 
-                if acc.get("institution_id")
-            )
-            
-            for inst_id in unique_institutions:
-                if inst_id and inst_id not in self._institution_names:
-                    inst_info = await self.api_client.get_institution(inst_id)
-                    if inst_info:
-                        self._institution_names[inst_id] = inst_info.get("name", inst_id)
-                        _LOGGER.debug("Cached institution name: %s = %s", inst_id, inst_info.get("name"))
-            
-            # Store the result temporarily so _populate_missing_data can access it
-            temp_result = {
-                "requisitions": requisitions,
-                "accounts": accounts_data,
-                "institution_names": self._institution_names,
-            }
-            
-            # Update self.data temporarily so populate method can work
-            if not self.data:
-                self.data = temp_result
-            else:
-                self.data.update(temp_result)
-            
-            # Check for accounts with missing data and fetch it
-            await self._populate_missing_data(accounts_data)
-            
-            # Mark successful refresh time before returning
-            self.last_successful_refresh = dt_util.utcnow()
-
-            # Return updated data
-            return self.data
-            
-        except Exception as err:
-            if not self.data and cached_data:
-                self.data = {
-                    "requisitions": [],
-                    "accounts": cached_data.get("accounts", {}),
-                    "institution_names": self._institution_names,
-                }
-                saved_at = cached_data.get("saved_at")
-                if saved_at and not self.last_successful_refresh:
-                    self.last_successful_refresh = dt_util.parse_datetime(saved_at)
-            raise UpdateFailed(f"Error communicating with API: {err}") from err
-        finally:
-            self._force_balance_refresh = False
-
-    async def async_force_refresh_balances(self) -> None:
-        """Force a refresh of balances on next coordinator update."""
-        self._force_balance_refresh = True
-        await self.async_refresh()
-
-    async def _populate_missing_data(self, accounts_data: dict[str, Any]) -> None:
-        """Populate missing balance/details data for accounts."""
-        for account_id, account_info in accounts_data.items():
-            # Check if details are missing
-            if not account_info.get("details"):
-                _LOGGER.info("Fetching missing details for account %s", account_id)
-                try:
-                    await self.async_update_account_details(account_id)
-                except Exception as err:
-                    _LOGGER.error("Failed to fetch initial details for %s: %s", account_id, err)
-            
-            # Check if balances are missing or a forced refresh is requested
-            if self._force_balance_refresh or not account_info.get("balances"):
-                _LOGGER.info("Fetching missing balances for account %s", account_id)
-                try:
-                    await self.async_update_account_balances(account_id)
-                except Exception as err:
-                    _LOGGER.error("Failed to fetch initial balances for %s: %s", account_id, err)
-
-    async def async_update_account_details(self, account_id: str) -> dict[str, Any] | None:
-        """Update account details for a specific account."""
-        try:
-            details = await self.api_client.get_account_details(
-                account_id, max_per_day=RATE_LIMIT_DETAILS
-            )
-            
-            if details and self.data:
-                if account_id in self.data["accounts"]:
-                    self.data["accounts"][account_id]["details"] = details
-                    self.data["accounts"][account_id]["details_updated"] = datetime.now().isoformat()
-                    self.async_set_updated_data(self.data)
-                    # Save to storage
-                    await self._save_account_data()
-            
-            return details
-        except Exception as err:
-            _LOGGER.error("Failed to update account details for %s: %s", account_id, err)
-            return None
-
-    async def async_update_account_balances(self, account_id: str) -> dict[str, Any] | None:
-        """Update account balances for a specific account."""
-        try:
-            balances = await self.api_client.get_account_balances(
-                account_id, max_per_day=RATE_LIMIT_BALANCES
-            )
-            
-            if balances and self.data:
-                if account_id in self.data["accounts"]:
-                    self.data["accounts"][account_id]["balances"] = balances
-                    self.data["accounts"][account_id]["balances_updated"] = datetime.now().isoformat()
-                    self.async_set_updated_data(self.data)
-                    # Save to storage
-                    await self._save_account_data()
-            
-            return balances
-        except Exception as err:
-            _LOGGER.error("Failed to update account balances for %s: %s", account_id, err)
-            return None
-
-    async def async_update_account_transactions(self, account_id: str) -> dict[str, Any] | None:
-        """Update account transactions for a specific account."""
-        try:
-            transactions = await self.api_client.get_account_transactions(
-                account_id, max_per_day=RATE_LIMIT_TRANSACTIONS
-            )
-            
-            if transactions and self.data:
-                if account_id in self.data["accounts"]:
-                    self.data["accounts"][account_id]["transactions"] = transactions
-                    self.data["accounts"][account_id]["transactions_updated"] = datetime.now().isoformat()
-                    self.async_set_updated_data(self.data)
-                    # Save to storage
-                    await self._save_account_data()
-            
-            return transactions
-        except Exception as err:
-            _LOGGER.error(
-                "Failed to update account transactions for %s: %s", account_id, err
-            )
-            return None
-
-    async def _save_account_data(self) -> None:
-        """Save account data to storage."""
+    @property
+    def last_successful_refresh(self) -> datetime | None:
+        """Expose last successful refresh for scheduling logic."""
         if not self.data:
-            return
-        
-        save_data = {
-            "accounts": self.data.get("accounts", {}),
-            "saved_at": dt_util.utcnow().isoformat(),
+            return None
+        return self.data.get_last_successful_refresh_dt()
+
+    async def _async_update_data(self) -> IntegrationSnapshot:
+        """Fetch requisitions and refresh account snapshot."""
+        previous = self.data or IntegrationSnapshot()
+        accounts = dict(previous.accounts)
+        institution_names = dict(previous.institution_names)
+
+        try:
+            requisitions = await self._api_client.get_requisitions()
+            for requisition in requisitions:
+                if requisition.get("status") != "LN":
+                    continue
+                requisition_id = requisition.get("id")
+                institution_id = requisition.get("institution_id")
+                account_ids = requisition.get("accounts", [])
+                for account_id in account_ids:
+                    if not isinstance(account_id, str):
+                        continue
+                    previous_account = accounts.get(account_id)
+                    details_payload = previous_account.details if previous_account else None
+                    balances_payload = self._to_balances_payload(previous_account)
+                    details_updated = previous_account.details_updated if previous_account else None
+                    balances_updated = previous_account.balances_updated if previous_account else None
+
+                    if details_payload is None:
+                        details_payload = await self._api_client.get_account_details(
+                            account_id,
+                            max_per_day=RATE_LIMIT_DETAILS,
+                        )
+                        details_updated = dt_util.utcnow().isoformat()
+
+                    should_refresh_balance = self._should_refresh_balances(previous_account)
+                    if balances_payload is None or should_refresh_balance:
+                        balances_payload = await self._api_client.get_account_balances(
+                            account_id,
+                            max_per_day=RATE_LIMIT_BALANCES,
+                        )
+                        balances_updated = dt_util.utcnow().isoformat()
+
+                    accounts[account_id] = AccountSnapshot.from_api(
+                        account_id=account_id,
+                        requisition_id=requisition_id,
+                        institution_id=institution_id,
+                        details_payload=details_payload,
+                        balances_payload=balances_payload,
+                        details_updated=details_updated,
+                        balances_updated=balances_updated,
+                    )
+
+                    if institution_id and institution_id not in institution_names:
+                        institution = await self._api_client.get_institution(institution_id)
+                        institution_names[institution_id] = institution.get("name", institution_id)
+
+        except GCBadCannotConnectError as err:
+            raise UpdateFailed(str(err)) from err
+        except GCBadRateLimitError as err:
+            raise UpdateFailed(str(err)) from err
+        except GCBadApiError as err:
+            if "Authentication failed" in str(err):
+                raise ConfigEntryAuthFailed(str(err)) from err
+            raise UpdateFailed(str(err)) from err
+
+        refreshed_at = dt_util.utcnow()
+        snapshot = IntegrationSnapshot(
+            accounts=accounts,
+            institution_names=institution_names,
+            last_successful_refresh=refreshed_at.isoformat(),
+        )
+        await self._storage.save_snapshot(snapshot, refreshed_at)
+        return snapshot
+
+    def _should_refresh_balances(self, account: AccountSnapshot | None) -> bool:
+        """Return True when balance data is absent or stale."""
+        if account is None or not account.balances:
+            return True
+        if not account.balances_updated:
+            return True
+        parsed = dt_util.parse_datetime(account.balances_updated)
+        if parsed is None:
+            return True
+        return (dt_util.utcnow() - parsed) >= UPDATE_INTERVAL_BALANCES
+
+    def _to_balances_payload(self, account: AccountSnapshot | None) -> dict | None:
+        """Convert typed balances back to minimal API-like payload."""
+        if account is None or not account.balances:
+            return None
+        return {
+            "balances": [
+                {
+                    "balanceAmount": {
+                        "amount": balance.amount,
+                        "currency": balance.currency,
+                    },
+                    "balanceType": balance.balance_type,
+                    "referenceDate": balance.reference_date,
+                }
+                for balance in account.balances
+            ]
         }
-        
-        await self._store.async_save(save_data)
-        _LOGGER.debug("Saved account data to storage")
 

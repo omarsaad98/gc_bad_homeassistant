@@ -4,9 +4,11 @@
   "codeowners": [],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/home-assistant/example-custom-config/tree/master/custom_components/gc_bad/",
+  "documentation": "https://github.com/omarsaad98/gc_bad_homeassistant",
   "iot_class": "cloud_polling",
-  "requirements": [],
+  "requirements": [
+    "pycountry"
+  ],
   "version": "0.1.0"
 }
 
