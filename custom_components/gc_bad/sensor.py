@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, UPDATE_INTERVAL_BALANCES
 from .coordinator import GoCardlessDataUpdateCoordinator
@@ -37,7 +38,10 @@ async def async_setup_entry(
     # Create sensors for each balance in each account
     if coordinator.data and "accounts" in coordinator.data:
         for account_id, account_data in coordinator.data["accounts"].items():
-            balances = account_data.get("balances", {}).get("balances", [])
+            balances_data = account_data.get("balances") or {}
+            balances = balances_data.get("balances", [])
+            if not isinstance(balances, list):
+                balances = []
             for balance in balances:
                 currency = balance.get("balanceAmount", {}).get("currency")
                 balance_type = balance.get("balanceType")
@@ -214,8 +218,51 @@ class GoCardlessAccountBalanceSensor(CoordinatorEntity, RestoreSensor):
                 attributes["balance_type"] = balance_info.get("balanceType")
                 attributes["reference_date"] = balance_info.get("referenceDate")
                 break
+
+        attributes["data_stale"] = not self.coordinator.last_update_success
+        last_success = self.coordinator.last_successful_refresh
+        attributes["last_successful_refresh"] = (
+            dt_util.as_local(last_success).isoformat() if last_success else None
+        )
         
         return attributes
+
+    @property
+    def available(self) -> bool:
+        """Return True if cached data exists, even when updates fail."""
+        if super().available:
+            return True
+        return self._has_cached_balance()
+
+    def _has_cached_balance(self) -> bool:
+        """Check if cached data can provide a balance value."""
+        if self._attr_native_value is not None:
+            return True
+
+        if not self.coordinator.data:
+            return False
+
+        account_data = self.coordinator.data.get("accounts", {}).get(self._account_id)
+        if not account_data:
+            return False
+
+        balances = account_data.get("balances")
+        if not balances or "balances" not in balances:
+            return False
+
+        for balance_info in balances["balances"]:
+            if (
+                balance_info.get("balanceAmount", {}).get("currency")
+                != self._balance_currency
+            ):
+                continue
+            if self._balance_type and balance_info.get("balanceType") != self._balance_type:
+                continue
+            amount = balance_info.get("balanceAmount", {}).get("amount")
+            if amount is not None:
+                return True
+
+        return False
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass, ensure we have balance data."""

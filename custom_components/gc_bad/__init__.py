@@ -17,6 +17,7 @@ from .const import (
     DOMAIN,
     REFRESH_SKIP_WINDOW,
     SCHEDULED_REFRESH_HOURS,
+    UPDATE_INTERVAL_BALANCES,
 )
 from .coordinator import GoCardlessDataUpdateCoordinator
 from .views import GoCardlessAuthCallbackView
@@ -48,8 +49,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Load cached data without calling the API
     await coordinator.async_load_cached_data()
-    # Ensure balances are refreshed so new balance types appear on reload
-    await coordinator.async_force_refresh_balances()
+
+    should_force_balance_refresh = True
+    if coordinator.data and coordinator.data.get("accounts"):
+        now = dt_util.utcnow()
+        has_recent_balance = False
+        for account_data in coordinator.data["accounts"].values():
+            balances = account_data.get("balances")
+            if not balances:
+                continue
+            updated_at = account_data.get("balances_updated")
+            if not updated_at:
+                continue
+            parsed = dt_util.parse_datetime(updated_at)
+            if parsed and now - parsed < UPDATE_INTERVAL_BALANCES:
+                has_recent_balance = True
+                break
+
+        if has_recent_balance:
+            should_force_balance_refresh = False
+
+    if should_force_balance_refresh:
+        # Ensure balances are refreshed so new balance types appear on reload
+        await coordinator.async_force_refresh_balances()
+    else:
+        _LOGGER.debug(
+            "Skipping forced balance refresh; cached balances are recent"
+        )
 
     # Store coordinator in hass.data
     hass.data.setdefault(DOMAIN, {})

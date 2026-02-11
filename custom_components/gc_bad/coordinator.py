@@ -72,6 +72,7 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
+        cached_data = None
         try:
             # Try to load cached account data first (to preserve on restart)
             cached_data = await self._store.async_load()
@@ -153,6 +154,15 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator):
             return self.data
             
         except Exception as err:
+            if not self.data and cached_data:
+                self.data = {
+                    "requisitions": [],
+                    "accounts": cached_data.get("accounts", {}),
+                    "institution_names": self._institution_names,
+                }
+                saved_at = cached_data.get("saved_at")
+                if saved_at and not self.last_successful_refresh:
+                    self.last_successful_refresh = dt_util.parse_datetime(saved_at)
             raise UpdateFailed(f"Error communicating with API: {err}") from err
         finally:
             self._force_balance_refresh = False
