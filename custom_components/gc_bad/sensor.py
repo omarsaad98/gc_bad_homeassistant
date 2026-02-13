@@ -142,6 +142,7 @@ class GoCardlessAccountBalanceSensor(GCBadBaseEntity, RestoreSensor):
             return
         self._attr_native_value = restored.native_value
         self._attr_native_unit_of_measurement = restored.native_unit_of_measurement
-        if restored.extra_attributes:
-            self._restored_attributes = dict(restored.extra_attributes)
+        extra_attrs = getattr(restored, "extra_attributes", None)
+        if extra_attrs:
+            self._restored_attributes = dict(extra_attrs)
 
