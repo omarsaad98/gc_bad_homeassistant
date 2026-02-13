@@ -12,7 +12,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .api.client import GCBadApiError, GCBadCannotConnectError, GoCardlessApiClient
-from .const import CONF_SECRET_ID, CONF_SECRET_KEY, DOMAIN
+from .const import CONF_SECRET_ID, CONF_SECRET_KEY, DOMAIN, IGNORED_INSTITUTION_PREFIXES
 from .storage import IntegrationStorage
 
 _LOGGER = logging.getLogger(__name__)
@@ -123,6 +123,12 @@ class GoCardlessOptionsFlowHandler(config_entries.OptionsFlow):
             self._state["country"] = user_input["country"]
             try:
                 institutions = await self._get_client().get_institutions(self._state["country"])
+                if institutions:
+                    institutions = [
+                        inst
+                        for inst in institutions
+                        if not inst.get("id", "").startswith(IGNORED_INSTITUTION_PREFIXES)
+                    ]
             except GCBadCannotConnectError:
                 errors["base"] = "cannot_connect"
             except GCBadApiError:

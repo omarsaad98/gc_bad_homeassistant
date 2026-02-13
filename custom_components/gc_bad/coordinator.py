@@ -15,7 +15,13 @@ from .api.client import (
     GCBadRateLimitError,
     GoCardlessApiClient,
 )
-from .const import DOMAIN, RATE_LIMIT_BALANCES, RATE_LIMIT_DETAILS, UPDATE_INTERVAL_BALANCES
+from .const import (
+    DOMAIN,
+    IGNORED_INSTITUTION_PREFIXES,
+    RATE_LIMIT_BALANCES,
+    RATE_LIMIT_DETAILS,
+    UPDATE_INTERVAL_BALANCES,
+)
 from .models import AccountSnapshot, IntegrationSnapshot
 from .storage import IntegrationStorage
 
@@ -60,8 +66,10 @@ class GoCardlessDataUpdateCoordinator(DataUpdateCoordinator[IntegrationSnapshot]
             for requisition in requisitions:
                 if requisition.get("status") != "LN":
                     continue
+                institution_id = requisition.get("institution_id", "")
+                if institution_id.startswith(IGNORED_INSTITUTION_PREFIXES):
+                    continue
                 requisition_id = requisition.get("id")
-                institution_id = requisition.get("institution_id")
                 account_ids = requisition.get("accounts", [])
                 for account_id in account_ids:
                     if not isinstance(account_id, str):

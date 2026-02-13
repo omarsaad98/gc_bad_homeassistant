@@ -31,3 +31,5 @@ SCOPE_TRANSACTIONS = "transactions"
 # Storage schema
 STORAGE_VERSION = 1
 
+# Institution filtering
+IGNORED_INSTITUTION_PREFIXES = ("SANDBOXFINANCE_",)
